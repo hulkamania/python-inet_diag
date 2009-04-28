@@ -1,0 +1,8 @@
+COPYING
+pss.py
+python-inet_diag/inet_diag_copy.h
+python-inet_diag/inet_diag.c
+setup.py
+rpm/SPECS/python-inet_diag.spec
+MANIFEST
+Makefile

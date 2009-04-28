@@ -79,6 +79,15 @@ static int default_states = SS_ALL & ~((1 << SS_LISTEN) |
 				       (1 << SS_TIME_WAIT) |
 				       (1 << SS_SYN_RECV));
 
+static const char *tmr_name[] = {
+	"off",
+	"on",
+	"keepalive",
+	"timewait",
+	"persist",
+	"unknown"
+};
+
 struct inet_socket {
 	PyObject_HEAD
 	struct inet_diag_msg msg;
@@ -133,13 +142,11 @@ static PyObject *inet_socket__saddr(struct inet_socket *self,
 	return PyString_FromString(buf);
 }
 
-static char inet_socket__state_doc__[] =
-"sport() -- get internet socket state";
-static PyObject *inet_socket__state(struct inet_socket *self,
-				    PyObject *args __unused)
-{
-	return PyString_FromString(sstate_name[self->msg.idiag_state]);
-}
+#define INET_SOCK__STR_METHOD(name, field, table, doc)		\
+static char inet_socket__##name##_doc__[] = #name "() -- " doc;	\
+static PyObject *inet_socket__##name(struct inet_socket *self,	\
+				     PyObject *args __unused)	\
+{ return PyString_FromString(table[self->msg.field]); }
 
 #define INET_SOCK__INT_METHOD(name, field, doc)			\
 static char inet_socket__##name##_doc__[] = #name "() -- " doc;	\
@@ -151,12 +158,20 @@ INET_SOCK__INT_METHOD(dport, id.idiag_dport,
 		      "get internet socket destination port");
 INET_SOCK__INT_METHOD(sport, id.idiag_sport,
 		      "get internet socket source port");
+INET_SOCK__INT_METHOD(bound_iface, id.idiag_if,
+		      "get interface this socket is bound to");
+INET_SOCK__INT_METHOD(family, idiag_family,
+		      "get address family of this socket");
 INET_SOCK__INT_METHOD(receive_queue, idiag_rqueue,
 		      "get internet socket receive queue length");
-INET_SOCK__INT_METHOD(write_queue, idiag_rqueue,
+INET_SOCK__INT_METHOD(write_queue, idiag_wqueue,
 		      "get internet socket write queue length");
 INET_SOCK__INT_METHOD(inode, idiag_inode,
 		      "get internet socket associated inode");
+INET_SOCK__STR_METHOD(state, idiag_state, sstate_name,
+		      "get internet socket state");
+INET_SOCK__STR_METHOD(timer, idiag_timer, tmr_name,
+		      "get internet socket running timer");
 
 #define INET_SOCK__METHOD(name)	{			\
 	.ml_name  = #name,				\
@@ -165,14 +180,17 @@ INET_SOCK__INT_METHOD(inode, idiag_inode,
 }
 
 static struct PyMethodDef inet_socket__methods[] = {
+	INET_SOCK__METHOD(bound_iface),
 	INET_SOCK__METHOD(daddr),
 	INET_SOCK__METHOD(saddr),
 	INET_SOCK__METHOD(dport),
 	INET_SOCK__METHOD(sport),
+	INET_SOCK__METHOD(family),
 	INET_SOCK__METHOD(receive_queue),
 	INET_SOCK__METHOD(write_queue),
 	INET_SOCK__METHOD(inode),
 	INET_SOCK__METHOD(state),
+	INET_SOCK__METHOD(timer),
 	{ .ml_name = NULL, }
 };
 

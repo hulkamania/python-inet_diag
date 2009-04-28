@@ -18,7 +18,8 @@ import getopt, inet_diag, os, re, sys, procfs
 version="0.1"
 
 state_width = 10
-addr_width = 20
+addr_width = 15
+timer_width = 7
 
 def load_sockets():
 	idiag = inet_diag.create()
@@ -52,11 +53,15 @@ def thread_mapper(s):
 def print_sockets(pid, indent = 0):
 	header_printed = False
 	dirname = "/proc/%d/fd" % pid
-	for filename in os.listdir(dirname):
+	try:
+		filenames = os.listdir(dirname)
+	except: # Process died
+		return
+	for filename in filenames:
 		pathname = os.path.join(dirname, filename)
 		try:
 			linkto = os.readlink(pathname)
-		except:
+		except: # Process died
 			continue
 		inode_match = inode_re.match(linkto)
 		if not inode_match:
@@ -72,11 +77,12 @@ def print_sockets(pid, indent = 0):
 				return
 			header_printed = True
 		s = inodes[inode]
-		print "  %-*s %-6d %-6d %*s:%-5d %*s:%-5d" % \
+		print "  %-*s %-6d %-6d %*s:%-5d %*s:%-5d %-*s" % \
 		      (state_width, s.state(),
 		       s.receive_queue(), s.write_queue(),
 		       addr_width, s.saddr(), s.sport(),
-		       addr_width, s.daddr(), s.dport())
+		       addr_width, s.daddr(), s.dport(),
+		       timer_width, s.timer())
 
 def usage():
 	print '''Usage: psk [ OPTIONS ]

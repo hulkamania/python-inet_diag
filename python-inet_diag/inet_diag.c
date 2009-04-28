@@ -133,46 +133,6 @@ static PyObject *inet_socket__saddr(struct inet_socket *self,
 	return PyString_FromString(buf);
 }
 
-static char inet_socket__dport_doc__[] =
-"sport() -- get internet socket destination port";
-static PyObject *inet_socket__dport(struct inet_socket *self,
-				    PyObject *args __unused)
-{
-	return Py_BuildValue("i", ntohs(self->msg.id.idiag_dport));
-}
-
-static char inet_socket__sport_doc__[] =
-"sport() -- get internet socket source port";
-static PyObject *inet_socket__sport(struct inet_socket *self,
-				    PyObject *args __unused)
-{
-	return Py_BuildValue("i", ntohs(self->msg.id.idiag_sport));
-}
-
-static char inet_socket__receive_queue_doc__[] =
-"receive_queue() -- get internet socket receive queue length";
-static PyObject *inet_socket__receive_queue(struct inet_socket *self,
-					    PyObject *args __unused)
-{
-	return Py_BuildValue("i", self->msg.idiag_rqueue);
-}
-
-static char inet_socket__write_queue_doc__[] =
-"write_queue() -- get internet socket write queue length";
-static PyObject *inet_socket__write_queue(struct inet_socket *self,
-					  PyObject *args __unused)
-{
-	return Py_BuildValue("i", self->msg.idiag_wqueue);
-}
-
-static char inet_socket__inode_doc__[] =
-"inode() -- get internet socket associated inode";
-static PyObject *inet_socket__inode(struct inet_socket *self,
-				    PyObject *args __unused)
-{
-	return Py_BuildValue("i", self->msg.idiag_inode);
-}
-
 static char inet_socket__state_doc__[] =
 "sport() -- get internet socket state";
 static PyObject *inet_socket__state(struct inet_socket *self,
@@ -181,50 +141,39 @@ static PyObject *inet_socket__state(struct inet_socket *self,
 	return PyString_FromString(sstate_name[self->msg.idiag_state]);
 }
 
+#define INET_SOCK__INT_METHOD(name, field, doc)			\
+static char inet_socket__##name##_doc__[] = #name "() -- " doc;	\
+static PyObject *inet_socket__##name(struct inet_socket *self,	\
+				     PyObject *args __unused)	\
+{ return Py_BuildValue("i", self->msg.field); }
+
+INET_SOCK__INT_METHOD(dport, id.idiag_dport,
+		      "get internet socket destination port");
+INET_SOCK__INT_METHOD(sport, id.idiag_sport,
+		      "get internet socket source port");
+INET_SOCK__INT_METHOD(receive_queue, idiag_rqueue,
+		      "get internet socket receive queue length");
+INET_SOCK__INT_METHOD(write_queue, idiag_rqueue,
+		      "get internet socket write queue length");
+INET_SOCK__INT_METHOD(inode, idiag_inode,
+		      "get internet socket associated inode");
+
+#define INET_SOCK__METHOD(name)	{			\
+	.ml_name  = #name,				\
+	.ml_meth  = (PyCFunction)inet_socket__##name,	\
+	.ml_doc	  = inet_socket__##name##_doc__,	\
+}
+
 static struct PyMethodDef inet_socket__methods[] = {
-	{
-		.ml_name  = "daddr",
-		.ml_meth  = (PyCFunction)inet_socket__daddr,
-		.ml_doc	  = inet_socket__daddr_doc__,
-	},
-	{
-		.ml_name  = "saddr",
-		.ml_meth  = (PyCFunction)inet_socket__saddr,
-		.ml_doc	  = inet_socket__saddr_doc__,
-	},
-	{
-		.ml_name  = "dport",
-		.ml_meth  = (PyCFunction)inet_socket__dport,
-		.ml_doc	  = inet_socket__dport_doc__,
-	},
-	{
-		.ml_name  = "sport",
-		.ml_meth  = (PyCFunction)inet_socket__sport,
-		.ml_doc	  = inet_socket__sport_doc__,
-	},
-	{
-		.ml_name  = "receive_queue",
-		.ml_meth  = (PyCFunction)inet_socket__receive_queue,
-		.ml_doc	  = inet_socket__receive_queue_doc__,
-	},
-	{
-		.ml_name  = "write_queue",
-		.ml_meth  = (PyCFunction)inet_socket__write_queue,
-		.ml_doc	  = inet_socket__write_queue_doc__,
-	},
-	{
-		.ml_name  = "inode",
-		.ml_meth  = (PyCFunction)inet_socket__inode,
-		.ml_doc	  = inet_socket__inode_doc__,
-	},
-	{
-		.ml_name  = "state",
-		.ml_meth  = (PyCFunction)inet_socket__state,
-		.ml_doc	  = inet_socket__state_doc__,
-	},
-	{
-		.ml_name = NULL,
-	}
+	INET_SOCK__METHOD(daddr),
+	INET_SOCK__METHOD(saddr),
+	INET_SOCK__METHOD(dport),
+	INET_SOCK__METHOD(sport),
+	INET_SOCK__METHOD(receive_queue),
+	INET_SOCK__METHOD(write_queue),
+	INET_SOCK__METHOD(inode),
+	INET_SOCK__METHOD(state),
+	{ .ml_name = NULL, }
 };
 
 static PyObject *inet_socket__getattr(struct inet_socket *self, char *name)

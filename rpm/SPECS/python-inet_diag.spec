@@ -27,6 +27,7 @@ rm -rf %{buildroot}
 %{__python} setup.py install --skip-build --root %{buildroot}
 mkdir -p %{buildroot}%{_sbindir}
 cp -p pss.py %{buildroot}%{_sbindir}/pss
+cp -p psk.py %{buildroot}%{_sbindir}/psk
 
 %clean
 rm -rf %{buildroot}
@@ -35,6 +36,7 @@ rm -rf %{buildroot}
 %defattr(-,root,root)
 %doc COPYING
 %{_sbindir}/pss
+%{_sbindir}/psk
 %{python_sitearch}/inet_diag.so
 %if "%{python_ver}" >= "2.5"
 %{python_sitearch}/*.egg-info

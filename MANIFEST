@@ -1,5 +1,6 @@
 COPYING
 pss.py
+psk.py
 python-inet_diag/inet_diag_copy.h
 python-inet_diag/inet_diag.c
 setup.py

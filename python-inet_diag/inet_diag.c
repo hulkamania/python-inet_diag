@@ -165,6 +165,14 @@ static PyObject *inet_socket__write_queue(struct inet_socket *self,
 	return Py_BuildValue("i", self->msg.idiag_wqueue);
 }
 
+static char inet_socket__inode_doc__[] =
+"inode() -- get internet socket associated inode";
+static PyObject *inet_socket__inode(struct inet_socket *self,
+				    PyObject *args __unused)
+{
+	return Py_BuildValue("i", self->msg.idiag_inode);
+}
+
 static char inet_socket__state_doc__[] =
 "sport() -- get internet socket state";
 static PyObject *inet_socket__state(struct inet_socket *self,
@@ -203,6 +211,11 @@ static struct PyMethodDef inet_socket__methods[] = {
 		.ml_name  = "write_queue",
 		.ml_meth  = (PyCFunction)inet_socket__write_queue,
 		.ml_doc	  = inet_socket__write_queue_doc__,
+	},
+	{
+		.ml_name  = "inode",
+		.ml_meth  = (PyCFunction)inet_socket__inode,
+		.ml_doc	  = inet_socket__inode_doc__,
 	},
 	{
 		.ml_name  = "state",

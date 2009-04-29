@@ -27,6 +27,7 @@
 #ifndef __unused
 #define __unused __attribute__ ((unused))
 #endif
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 enum {
 	TCP_DB,
@@ -172,6 +173,12 @@ INET_SOCK__STR_METHOD(state, idiag_state, sstate_name,
 		      "get internet socket state");
 INET_SOCK__STR_METHOD(timer, idiag_timer, tmr_name,
 		      "get internet socket running timer");
+INET_SOCK__INT_METHOD(timer_expiration, idiag_expires,
+		      "get expiration time (in ms) for running timer");
+INET_SOCK__INT_METHOD(retransmissions, idiag_retrans,
+		      "get connection retransmissions timer");
+INET_SOCK__INT_METHOD(uid, idiag_uid,
+		      "get connection owner user id");
 
 #define INET_SOCK__METHOD(name)	{			\
 	.ml_name  = #name,				\
@@ -191,6 +198,9 @@ static struct PyMethodDef inet_socket__methods[] = {
 	INET_SOCK__METHOD(inode),
 	INET_SOCK__METHOD(state),
 	INET_SOCK__METHOD(timer),
+	INET_SOCK__METHOD(timer_expiration),
+	INET_SOCK__METHOD(retransmissions),
+	INET_SOCK__METHOD(uid),
 	{ .ml_name = NULL, }
 };
 
@@ -227,6 +237,10 @@ static PyObject *inet_socket__new(struct inet_diag_msg *r)
 		return NULL;
 
 	self->msg = *r;
+	if (self->msg.idiag_timer >= ARRAY_SIZE(tmr_name) - 1) {
+		/* Unknown timer */
+		self->msg.idiag_timer = ARRAY_SIZE(tmr_name) - 1;
+	}
 
 	return (PyObject *)self;
 }

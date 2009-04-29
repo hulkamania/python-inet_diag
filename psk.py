@@ -13,13 +13,14 @@
 #   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 #   General Public License for more details.
 
-import getopt, inet_diag, os, re, sys, procfs
+import getopt, inet_diag, os, re, procfs, pwd, sys
 
 version="0.1"
 
 state_width = 10
 addr_width = 15
 timer_width = 7
+owner_width = 8
 
 def load_sockets():
 	idiag = inet_diag.create()
@@ -75,14 +76,23 @@ def print_sockets(pid, indent = 0):
 						      procfs.process_cmdline(ps[pid]))
 			except:
 				return
+			print " %-*s %-6s %-6s %*s:%-5s %*s:%-5s %-*s %-*s %-5s %-3s" % \
+			      (state_width, "State", "Recv-Q", "Send-Q",
+			       addr_width, "Local Address", "Port",
+			       addr_width, "Peer Address", "Port",
+			       owner_width, "Owner",
+			       timer_width, "Timer", "(ms)", "Rtm")
 			header_printed = True
 		s = inodes[inode]
-		print "  %-*s %-6d %-6d %*s:%-5d %*s:%-5d %-*s" % \
+		owner = pwd.getpwuid(s.uid())[0]
+		print " %-*s %-6d %-6d %*s:%-5d %*s:%-5d %-*s %-*s %-5d %-3d" % \
 		      (state_width, s.state(),
 		       s.receive_queue(), s.write_queue(),
 		       addr_width, s.saddr(), s.sport(),
 		       addr_width, s.daddr(), s.dport(),
-		       timer_width, s.timer())
+		       owner_width, owner,
+		       timer_width, s.timer(), s.timer_expiration(),
+		       s.retransmissions())
 
 def usage():
 	print '''Usage: psk [ OPTIONS ]

@@ -50,8 +50,8 @@ def print_ms_timer(s):
 
 	return rc
 
-def print_sockets(show_options):
-	idiag = inet_diag.create()
+def print_sockets(show_options, states):
+	idiag = inet_diag.create(states = states)
 	while True:
 		try:
 			s = idiag.get()
@@ -121,8 +121,10 @@ def main():
 		print str(err)
 		sys.exit(2)
 
+	states = inet_diag.default_states;
+
 	if not opts:
-		print_sockets(False)
+		print_sockets(False, states)
 		sys.exit(0)
 
 	for o, a in opts:
@@ -133,9 +135,9 @@ def main():
    		elif o in ( "-r", "--resolve"):
 			not_implemented(o)
    		elif o in ( "-a", "--all"):
-			not_implemented(o)
+			states = inet_diag.SS_ALL;
    		elif o in ( "-l", "--listening"):
-			not_implemented(o)
+			states = 1 << inet_diag.SS_LISTEN;
    		elif o in ( "-o", "--options"):
 			show_options = True
    		elif o in ( "-e", "--extended"):
@@ -172,7 +174,7 @@ def main():
 			usage()
 			return
 
-	print_sockets(show_options)
+	print_sockets(show_options, states)
 
 if __name__ == '__main__':
     main()

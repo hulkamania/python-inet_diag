@@ -75,10 +75,10 @@ static const char *sstate_name[] = {
 
 #define SS_ALL ((1 << SS_MAX) - 1)
 
-static int default_states = SS_ALL & ~((1 << SS_LISTEN) |
-				       (1 << SS_CLOSE) |
-				       (1 << SS_TIME_WAIT) |
-				       (1 << SS_SYN_RECV));
+static const int default_states = SS_ALL & ~((1 << SS_LISTEN) |
+					     (1 << SS_CLOSE) |
+					     (1 << SS_TIME_WAIT) |
+					     (1 << SS_SYN_RECV));
 
 static const char *tmr_name[] = {
 	"off",
@@ -379,12 +379,18 @@ static PyTypeObject inet_diag_type = {
 /* constructor */
 static char inet_diag_create__doc__[] =
 "create() -- creates a new inet_diag socket.";
-static PyObject *inet_diag__create(PyObject *args __unused)
+static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
+				   PyObject *keywds)
 {
+	int states = default_states;
+	static char *kwlist[] = { "states", };
 	struct inet_diag *self = PyObject_NEW(struct inet_diag,
 					      &inet_diag_type);
 	if (self == NULL)
 		return NULL;
+
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "|i", kwlist, &states))
+		goto out_err;
 
 	self->socket = socket(AF_NETLINK, SOCK_RAW, NETLINK_INET_DIAG);
 	if (self->socket < 0)
@@ -405,7 +411,7 @@ static PyObject *inet_diag__create(PyObject *args __unused)
 		},
 		.r = {
 			.idiag_family = AF_INET,
-			.idiag_states = default_states,
+			.idiag_states = states,
 		},
 	};
 	struct iovec iov[1] = {
@@ -436,7 +442,7 @@ static struct PyMethodDef python_inet_diag__methods[] = {
 	{
 		.ml_name  = "create",
 		.ml_meth  = (PyCFunction)inet_diag__create,
-		.ml_flags = METH_VARARGS,
+		.ml_flags = METH_VARARGS | METH_KEYWORDS,
 		.ml_doc	  = inet_diag_create__doc__
 	},
 	{	.ml_name = NULL, },
@@ -458,4 +464,6 @@ PyMODINIT_FUNC initinet_diag(void)
 	PyModule_AddIntConstant(m, "SS_LAST_ACK",    SS_LAST_ACK);
 	PyModule_AddIntConstant(m, "SS_LISTEN",	     SS_LISTEN);
 	PyModule_AddIntConstant(m, "SS_CLOSING",     SS_CLOSING);
+	PyModule_AddIntConstant(m, "SS_ALL",	     SS_ALL);
+	PyModule_AddIntConstant(m, "default_states", default_states);
 }

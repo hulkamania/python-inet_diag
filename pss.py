@@ -23,20 +23,52 @@ def not_implemented(o):
 state_width = 10
 addr_width = 40
 
-def print_sockets():
+def print_ms_timer(s):
+	timeout = s.timer_expiration()
+
+	if timeout < 0:
+		timeout = 0
+	secs = timeout / 1000
+	minutes = secs / 60
+	secs = secs % 60
+	msecs = timeout % 1000
+	if minutes:
+		msecs = 0
+		rc = "%dmin" % minutes
+		if minutes > 9:
+			secs = 0
+	else:
+		rc = ""
+
+	if secs:
+		if secs > 9:
+			msecs = 0
+		rc += "%d%s" % (secs, msecs and "." or "sec")
+
+	if msecs:
+		rc += "%03dms" % msecs
+
+	return rc
+
+def print_sockets(show_options):
 	idiag = inet_diag.create()
 	while True:
 		try:
 			s = idiag.get()
 		except:
 			break
-		#print s
-		#continue
 		print "%-*s %-6d %-6d %*s:%-5d %*s:%-5d" % \
 		      (state_width, s.state(),
 		       s.receive_queue(), s.write_queue(),
 		       addr_width, s.saddr(), s.sport(),
-		       addr_width, s.daddr(), s.dport())
+		       addr_width, s.daddr(), s.dport()),
+		if show_options:
+			timer = s.timer()
+			if timer != "off":
+				print " timer:(%s,%s,%d)" % (timer,
+							     print_ms_timer(s),
+							     s.retransmissions()),
+		print
 
 def usage():
 	print '''Usage: ss [ OPTIONS ]
@@ -71,6 +103,7 @@ def usage():
        FILTER := [ state TCP-STATE ] [ EXPRESSION ]'''
 
 def main():
+	show_options = False
 	try:
 		opts, args = getopt.getopt(sys.argv[1:],
 					   "hVnraloempis460tudwxf:A:F:",
@@ -89,7 +122,7 @@ def main():
 		sys.exit(2)
 
 	if not opts:
-		print_sockets()
+		print_sockets(False)
 		sys.exit(0)
 
 	for o, a in opts:
@@ -104,7 +137,7 @@ def main():
    		elif o in ( "-l", "--listening"):
 			not_implemented(o)
    		elif o in ( "-o", "--options"):
-			not_implemented(o)
+			show_options = True
    		elif o in ( "-e", "--extended"):
 			not_implemented(o)
    		elif o in ( "-m", "--memory"):
@@ -138,6 +171,8 @@ def main():
 		else:
 			usage()
 			return
+
+	print_sockets(show_options)
 
 if __name__ == '__main__':
     main()

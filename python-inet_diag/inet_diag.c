@@ -23,6 +23,7 @@
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
 #include "inet_diag_copy.h"
 
 #ifndef __unused
@@ -109,12 +110,16 @@ struct inet_socket {
 	PyObject_HEAD
 	struct inet_diag_msg msg;
 	struct inet_diag_meminfo *ext_memory;
+	struct tcp_info *ext_protocol;
+	char *ext_congestion;
 };
 
 /* destructor */
 static void inet_socket__dealloc(struct inet_socket *self)
 {
 	free(self->ext_memory);
+	free(self->ext_protocol);
+	free(self->ext_congestion);
 	PyObject_Del(self);
 }
 
@@ -159,6 +164,19 @@ static PyObject *inet_socket__saddr(struct inet_socket *self,
 	inet_ntop(self->msg.idiag_family, &self->msg.id.idiag_src,
 		  buf, sizeof(buf));
 	return PyString_FromString(buf);
+}
+
+static char inet_socket__congestion_algorithm_doc__[] =
+"saddr() -- get internet socket congestion algorithm being used";
+static PyObject *inet_socket__congestion_algorithm(struct inet_socket *self,
+						   PyObject *args __unused)
+{
+	if (self->ext_congestion == NULL) {
+		PyErr_SetString(PyExc_OSError,			
+				"no congestion algorithm on this socket");
+		return NULL;
+	}
+	return PyString_FromString(self->ext_congestion);
 }
 
 #define INET_SOCK__STR_METHOD(name, field, table, doc)		\
@@ -219,6 +237,28 @@ INET_SOCK__EXT_INT_METHOD(write_queue_memory, memory, idiag_tmem,
 INET_SOCK__EXT_INT_METHOD(forward_alloc, memory, idiag_fmem,
 			  "memory in bytes a socket can allocate before the "
 			  "socket buffer autotuning routines enter memory pressure");
+INET_SOCK__EXT_INT_METHOD(congestion_state, protocol, tcpi_ca_state,
+			  "get socket congestion state");
+INET_SOCK__EXT_INT_METHOD(windows_probes_out, protocol, tcpi_probes,
+			  "get number of unanswered 0 window probes");
+INET_SOCK__EXT_INT_METHOD(protocol_options, protocol, tcpi_options,
+			  "get protocol specific options being used in the socket");
+INET_SOCK__EXT_INT_METHOD(receive_window_scale_shift, protocol, tcpi_rcv_wscale,
+			  "get receive window scale shift used in this socket");
+INET_SOCK__EXT_INT_METHOD(send_window_scale_shift, protocol, tcpi_snd_wscale,
+			  "get send window scale shift used in this socket");
+INET_SOCK__EXT_INT_METHOD(rto, protocol, tcpi_rto,
+			  "get retransmission timeout used on this socket");
+INET_SOCK__EXT_INT_METHOD(rtt, protocol, tcpi_rtt,
+			  "get round trip time calculated on this socket");
+INET_SOCK__EXT_INT_METHOD(rttvar, protocol, tcpi_rttvar,
+			  "get round trip time variation calculated on this socket");
+INET_SOCK__EXT_INT_METHOD(ato, protocol, tcpi_ato,
+			  "get socket ack timeout value");
+INET_SOCK__EXT_INT_METHOD(cwnd, protocol, tcpi_snd_cwnd,
+			  "get socket congestion window");
+INET_SOCK__EXT_INT_METHOD(ssthresh, protocol, tcpi_snd_ssthresh,
+			  "get socket slow start threshold");
 
 #define INET_SOCK__METHOD(name)	{			\
 	.ml_name  = #name,				\
@@ -245,6 +285,18 @@ static struct PyMethodDef inet_socket__methods[] = {
 	INET_SOCK__METHOD(write_queue_used_memory),
 	INET_SOCK__METHOD(write_queue_memory),
 	INET_SOCK__METHOD(forward_alloc),
+	INET_SOCK__METHOD(congestion_state),
+	INET_SOCK__METHOD(windows_probes_out),
+	INET_SOCK__METHOD(protocol_options),
+	INET_SOCK__METHOD(receive_window_scale_shift),
+	INET_SOCK__METHOD(send_window_scale_shift),
+	INET_SOCK__METHOD(congestion_algorithm),
+	INET_SOCK__METHOD(rto),
+	INET_SOCK__METHOD(rtt),
+	INET_SOCK__METHOD(rttvar),
+	INET_SOCK__METHOD(ato),
+	INET_SOCK__METHOD(cwnd),
+	INET_SOCK__METHOD(ssthresh),
 	{ .ml_name = NULL, }
 };
 
@@ -285,7 +337,10 @@ static PyObject *inet_socket__new(struct inet_diag_msg *r, int nlmsg_len)
 		/* Unknown timer */
 		self->msg.idiag_timer = ARRAY_SIZE(tmr_name) - 1;
 	}
+
 	self->ext_memory = NULL;
+	self->ext_protocol = NULL;
+	self->ext_congestion = NULL;
 
 	if (nlmsg_len) {
 		struct rtattr *tb[INET_DIAG_MAX + 1];
@@ -302,6 +357,28 @@ static PyObject *inet_socket__new(struct inet_diag_msg *r, int nlmsg_len)
 
 			*self->ext_memory = *minfo;
 		}
+
+		if (tb[INET_DIAG_INFO]) {
+			struct tcp_info *info = RTA_DATA(tb[INET_DIAG_INFO]);
+			size_t len = RTA_PAYLOAD(tb[INET_DIAG_INFO]);
+
+			self->ext_protocol = malloc(sizeof(*self->ext_protocol));
+			if (self->ext_protocol == NULL)
+				goto out_err;
+
+			/* workaround for older kernels with less fields */
+			if (len < sizeof(*info))
+				memset(self->ext_protocol + len, 0,
+				       sizeof(*info) - len);
+
+			*self->ext_protocol = *info;
+		}
+
+		if (tb[INET_DIAG_CONG]) {
+                        self->ext_congestion = strdup(RTA_DATA(tb[INET_DIAG_CONG]));
+			if (self->ext_congestion == NULL)
+				goto out_err;
+		}
 	}
 
 	return (PyObject *)self;
@@ -316,7 +393,7 @@ struct inet_diag {
 	int		socket;		/* NETLINK socket */
 	char		buf[8192];
 	struct nlmsghdr *h;
-	int		len;
+	size_t		len;
 };
 
 /* destructor */
@@ -359,9 +436,9 @@ try_again_recvmsg:
 			.msg_iov     = iov,
 			.msg_iovlen  = 1,
 		};
-		self->len = recvmsg(self->socket, &msg, 0);
+		int len = recvmsg(self->socket, &msg, 0);
 
-		if (self->len < 0) {
+		if (len < 0) {
 			if (errno == EINTR)
 				goto try_again_recvmsg;
 out_eof:
@@ -370,12 +447,13 @@ out_eof:
 			return NULL;
 		}
 
-		if (self->len == 0) { /* EOF, how to signal properly? */
+		if (len == 0) { /* EOF, how to signal properly? */
 			close(self->socket);
 			PyErr_SetNone(PyExc_EOFError);
 			return NULL;
 		}
 
+		self->len = len;
 		self->h = (void *)self->buf;
 	}
 	}
@@ -540,4 +618,8 @@ PyMODINIT_FUNC initinet_diag(void)
 	PyModule_AddIntConstant(m, "EXT_PROTOCOL",   1 << (INET_DIAG_INFO - 1));
 	PyModule_AddIntConstant(m, "EXT_TCP_VEGAS",  1 << (INET_DIAG_VEGASINFO - 1));
 	PyModule_AddIntConstant(m, "EXT_CONGESTION", 1 << (INET_DIAG_CONG - 1));
+	PyModule_AddIntConstant(m, "PROTO_OPT_TIMESTAMPS", TCPI_OPT_TIMESTAMPS);
+	PyModule_AddIntConstant(m, "PROTO_OPT_SACK", TCPI_OPT_SACK);
+	PyModule_AddIntConstant(m, "PROTO_OPT_WSCALE", TCPI_OPT_WSCALE);
+	PyModule_AddIntConstant(m, "PROTO_OPT_ECN", TCPI_OPT_ECN);
 }

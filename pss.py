@@ -50,10 +50,12 @@ def print_ms_timer(s):
 
 	return rc
 
-def print_sockets(states, show_options, show_mem):
+def print_sockets(states, show_options, show_mem, show_protocol_info):
 	extensions = 0
 	if show_mem:
 		extensions |= inet_diag.EXT_MEMORY;
+	if show_protocol_info:
+		extensions |= inet_diag.EXT_PROTOCOL | inet_diag.EXT_CONGESTION;
 	idiag = inet_diag.create(states = states, extensions = extensions); 
 	while True:
 		try:
@@ -80,6 +82,42 @@ def print_sockets(states, show_options, show_mem):
 					 s.forward_alloc()),
 			except:
 				pass
+
+		if show_protocol_info:
+			try:
+				options = s.protocol_options()
+				if options & inet_diag.PROTO_OPT_TIMESTAMPS:
+					print "ts",
+				if options & inet_diag.PROTO_OPT_SACK:
+					print "sack",
+				if options & inet_diag.PROTO_OPT_ECN:
+					print "ecn",
+				print s.congestion_algorithm(),
+				if options & inet_diag.PROTO_OPT_WSCALE:
+					print "wscale:%d,%d" % (s.receive_window_scale_shift(),
+							        s.send_window_scale_shift()),
+			except:
+				pass
+
+			try:
+				print "rto:%g" % s.rto(),
+			except:
+				pass
+
+			try:
+				print "rtt:%g/%g ato:%g cwnd:%d" % \
+					(s.rtt() / 1000.0, s.rttvar() / 1000.0,
+					 s.ato() / 1000.0, s.cwnd()),
+			except:
+				pass
+
+			try:
+				ssthresh = s.ssthresh()
+				if ssthresh < 0xffff:
+					print "ssthresh:%d" % ssthresh,
+			except:
+				pass
+
 		print
 
 def usage():
@@ -134,6 +172,7 @@ def main():
 
 	show_options = False
 	show_mem = False
+	show_protocol_info = False
 	states = inet_diag.default_states;
 
 	if not opts:
@@ -160,7 +199,7 @@ def main():
    		elif o in ( "-p", "--processes"):
 			not_implemented(o)
    		elif o in ( "-i", "--info"):
-			not_implemented(o)
+			show_protocol_info = True
    		elif o in ( "-s", "--summary"):
 			not_implemented(o)
    		elif o in ( "-4", "--ipv4"):
@@ -187,7 +226,7 @@ def main():
 			usage()
 			return
 
-	print_sockets(states, show_options, show_mem)
+	print_sockets(states, show_options, show_mem, show_protocol_info)
 
 if __name__ == '__main__':
     main()

@@ -21,6 +21,7 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
+#include <linux/rtnetlink.h>
 #include <arpa/inet.h>
 #include "inet_diag_copy.h"
 
@@ -28,6 +29,21 @@
 #define __unused __attribute__ ((unused))
 #endif
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+
+/* From libnetlink */
+static int parse_rtattr(struct rtattr *tb[], int max,
+			struct rtattr *rta, int len)
+{
+	memset(tb, 0, sizeof(struct rtattr *) * (max + 1));
+	while (RTA_OK(rta, len)) {
+		if (rta->rta_type <= max)
+			tb[rta->rta_type] = rta;
+		rta = RTA_NEXT(rta,len);
+	}
+	if (len)
+		fprintf(stderr, "!!!Deficit %d, rta_len=%d\n", len, rta->rta_len);
+	return 0;
+}
 
 enum {
 	TCP_DB,
@@ -92,11 +108,13 @@ static const char *tmr_name[] = {
 struct inet_socket {
 	PyObject_HEAD
 	struct inet_diag_msg msg;
+	struct inet_diag_meminfo *ext_memory;
 };
 
 /* destructor */
 static void inet_socket__dealloc(struct inet_socket *self)
 {
+	free(self->ext_memory);
 	PyObject_Del(self);
 }
 
@@ -155,6 +173,19 @@ static PyObject *inet_socket__##name(struct inet_socket *self,	\
 				     PyObject *args __unused)	\
 { return Py_BuildValue("i", self->msg.field); }
 
+#define INET_SOCK__EXT_INT_METHOD(name, ext, field, doc)	\
+static char inet_socket__##name##_doc__[] = #name "() -- " doc;	\
+static PyObject *inet_socket__##name(struct inet_socket *self,	\
+				     PyObject *args __unused)	\
+{								\
+	if (self->ext_##ext == NULL) {				\
+		PyErr_SetString(PyExc_OSError,			\
+				"extension not requested");	\
+		return NULL;					\
+	}							\
+	return Py_BuildValue("l", self->ext_##ext->field); 	\
+}
+		
 INET_SOCK__INT_METHOD(dport, id.idiag_dport,
 		      "get internet socket destination port");
 INET_SOCK__INT_METHOD(sport, id.idiag_sport,
@@ -179,6 +210,15 @@ INET_SOCK__INT_METHOD(retransmissions, idiag_retrans,
 		      "get connection retransmissions timer");
 INET_SOCK__INT_METHOD(uid, idiag_uid,
 		      "get connection owner user id");
+INET_SOCK__EXT_INT_METHOD(receive_queue_memory, memory, idiag_rmem,
+			  "get memory in bytes allocated for socket receive queue");
+INET_SOCK__EXT_INT_METHOD(write_queue_used_memory, memory, idiag_wmem,
+			  "get number of bytes queued from socket write queue");
+INET_SOCK__EXT_INT_METHOD(write_queue_memory, memory, idiag_tmem,
+			  "get number of bytes allocated for the socket write queue");
+INET_SOCK__EXT_INT_METHOD(forward_alloc, memory, idiag_fmem,
+			  "memory in bytes a socket can allocate before the "
+			  "socket buffer autotuning routines enter memory pressure");
 
 #define INET_SOCK__METHOD(name)	{			\
 	.ml_name  = #name,				\
@@ -201,6 +241,10 @@ static struct PyMethodDef inet_socket__methods[] = {
 	INET_SOCK__METHOD(timer_expiration),
 	INET_SOCK__METHOD(retransmissions),
 	INET_SOCK__METHOD(uid),
+	INET_SOCK__METHOD(receive_queue_memory),
+	INET_SOCK__METHOD(write_queue_used_memory),
+	INET_SOCK__METHOD(write_queue_memory),
+	INET_SOCK__METHOD(forward_alloc),
 	{ .ml_name = NULL, }
 };
 
@@ -228,7 +272,7 @@ static PyTypeObject inet_socket__type = {
 };
 
 /* constructor */
-static PyObject *inet_socket__new(struct inet_diag_msg *r)
+static PyObject *inet_socket__new(struct inet_diag_msg *r, int nlmsg_len)
 {
 	struct inet_socket *self;
 
@@ -241,8 +285,30 @@ static PyObject *inet_socket__new(struct inet_diag_msg *r)
 		/* Unknown timer */
 		self->msg.idiag_timer = ARRAY_SIZE(tmr_name) - 1;
 	}
+	self->ext_memory = NULL;
+
+	if (nlmsg_len) {
+		struct rtattr *tb[INET_DIAG_MAX + 1];
+
+		parse_rtattr(tb, INET_DIAG_MAX, (struct rtattr *)(r + 1),
+			     nlmsg_len);
+
+		if (tb[INET_DIAG_MEMINFO]) {
+			struct inet_diag_meminfo *minfo = RTA_DATA(tb[INET_DIAG_MEMINFO]);
+
+			self->ext_memory = malloc(sizeof(*self->ext_memory));
+			if (self->ext_memory == NULL)
+				goto out_err;
+
+			*self->ext_memory = *minfo;
+		}
+	}
 
 	return (PyObject *)self;
+out_err:
+	PyErr_SetNone(PyExc_MemoryError);
+	Py_XDECREF(self);
+	return NULL;
 }
 
 struct inet_diag {
@@ -336,9 +402,10 @@ out_eof:
 	}
 
 	struct inet_diag_msg *r = NLMSG_DATA(self->h);
+	const int nlmsg_len = self->h->nlmsg_len - NLMSG_LENGTH(sizeof(*r));
 	self->h = NLMSG_NEXT(self->h, self->len);
 
-	return inet_socket__new(r);
+	return inet_socket__new(r, nlmsg_len);
 }
 
 static struct PyMethodDef inet_diag__methods[] = {
@@ -383,13 +450,15 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 				   PyObject *keywds)
 {
 	int states = default_states;
-	static char *kwlist[] = { "states", };
+	int extensions = INET_DIAG_NONE;
+	static char *kwlist[] = { "states", "extensions", };
 	struct inet_diag *self = PyObject_NEW(struct inet_diag,
 					      &inet_diag_type);
 	if (self == NULL)
 		return NULL;
 
-	if (!PyArg_ParseTupleAndKeywords(args, keywds, "|i", kwlist, &states))
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "|ii", kwlist,
+					 &states, &extensions))
 		goto out_err;
 
 	self->socket = socket(AF_NETLINK, SOCK_RAW, NETLINK_INET_DIAG);
@@ -412,6 +481,7 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 		.r = {
 			.idiag_family = AF_INET,
 			.idiag_states = states,
+			.idiag_ext    = extensions,
 		},
 	};
 	struct iovec iov[1] = {
@@ -466,4 +536,8 @@ PyMODINIT_FUNC initinet_diag(void)
 	PyModule_AddIntConstant(m, "SS_CLOSING",     SS_CLOSING);
 	PyModule_AddIntConstant(m, "SS_ALL",	     SS_ALL);
 	PyModule_AddIntConstant(m, "default_states", default_states);
+	PyModule_AddIntConstant(m, "EXT_MEMORY",     1 << (INET_DIAG_MEMINFO - 1));
+	PyModule_AddIntConstant(m, "EXT_PROTOCOL",   1 << (INET_DIAG_INFO - 1));
+	PyModule_AddIntConstant(m, "EXT_TCP_VEGAS",  1 << (INET_DIAG_VEGASINFO - 1));
+	PyModule_AddIntConstant(m, "EXT_CONGESTION", 1 << (INET_DIAG_CONG - 1));
 }

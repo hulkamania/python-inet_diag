@@ -50,8 +50,11 @@ def print_ms_timer(s):
 
 	return rc
 
-def print_sockets(show_options, states):
-	idiag = inet_diag.create(states = states)
+def print_sockets(states, show_options, show_mem):
+	extensions = 0
+	if show_mem:
+		extensions |= inet_diag.EXT_MEMORY;
+	idiag = inet_diag.create(states = states, extensions = extensions); 
 	while True:
 		try:
 			s = idiag.get()
@@ -68,6 +71,15 @@ def print_sockets(show_options, states):
 				print " timer:(%s,%s,%d)" % (timer,
 							     print_ms_timer(s),
 							     s.retransmissions()),
+		if show_mem:
+			try:
+				print "\n\t mem:(r%u,w%u,f%u,t%u)" % \
+					(s.receive_queue_memory(),
+					 s.write_queue_used_memory(),
+					 s.write_queue_memory(),
+					 s.forward_alloc()),
+			except:
+				pass
 		print
 
 def usage():
@@ -103,7 +115,6 @@ def usage():
        FILTER := [ state TCP-STATE ] [ EXPRESSION ]'''
 
 def main():
-	show_options = False
 	try:
 		opts, args = getopt.getopt(sys.argv[1:],
 					   "hVnraloempis460tudwxf:A:F:",
@@ -121,6 +132,8 @@ def main():
 		print str(err)
 		sys.exit(2)
 
+	show_options = False
+	show_mem = False
 	states = inet_diag.default_states;
 
 	if not opts:
@@ -143,7 +156,7 @@ def main():
    		elif o in ( "-e", "--extended"):
 			not_implemented(o)
    		elif o in ( "-m", "--memory"):
-			not_implemented(o)
+			show_mem = True
    		elif o in ( "-p", "--processes"):
 			not_implemented(o)
    		elif o in ( "-i", "--info"):
@@ -174,7 +187,7 @@ def main():
 			usage()
 			return
 
-	print_sockets(show_options, states)
+	print_sockets(states, show_options, show_mem)
 
 if __name__ == '__main__':
     main()

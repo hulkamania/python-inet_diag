@@ -166,6 +166,15 @@ static PyObject *inet_socket__saddr(struct inet_socket *self,
 	return PyString_FromString(buf);
 }
 
+static char inet_socket__sock_doc__[] =
+"saddr() -- get internet socket pointer";
+static PyObject *inet_socket__sock(struct inet_socket *self,
+				   PyObject *args __unused)
+{
+	return Py_BuildValue("l", (((unsigned long)self->msg.id.idiag_cookie[0]) << 32) |
+				  self->msg.id.idiag_cookie[1]);
+}
+
 static char inet_socket__congestion_algorithm_doc__[] =
 "saddr() -- get internet socket congestion algorithm being used";
 static PyObject *inet_socket__congestion_algorithm(struct inet_socket *self,
@@ -278,6 +287,7 @@ static struct PyMethodDef inet_socket__methods[] = {
 	INET_SOCK__METHOD(saddr),
 	INET_SOCK__METHOD(dport),
 	INET_SOCK__METHOD(sport),
+	INET_SOCK__METHOD(sock),
 	INET_SOCK__METHOD(family),
 	INET_SOCK__METHOD(receive_queue),
 	INET_SOCK__METHOD(write_queue),

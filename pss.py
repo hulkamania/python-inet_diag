@@ -21,7 +21,7 @@ def not_implemented(o):
 	print "%s not implemented yet" % o 
 
 state_width = 10
-addr_width = 40
+addr_width = 18
 
 def print_ms_timer(s):
 	timeout = s.timer_expiration()
@@ -50,19 +50,25 @@ def print_ms_timer(s):
 
 	return rc
 
-def print_sockets(states, show_options, show_mem, show_protocol_info):
+def print_sockets(states, show_options = False, show_mem = False,
+		  show_protocol_info = False, show_details = False):
 	extensions = 0
 	if show_mem:
 		extensions |= inet_diag.EXT_MEMORY;
 	if show_protocol_info:
 		extensions |= inet_diag.EXT_PROTOCOL | inet_diag.EXT_CONGESTION;
 	idiag = inet_diag.create(states = states, extensions = extensions); 
+	print "%-*s %-6s %-6s %*s:%-5s   %*s:%-5s  " % \
+	      (state_width, "State",
+	       "Recv-Q", "Send-Q",
+	       addr_width, "Local Address", "Port",
+	       addr_width, "Peer Address", "Port")
 	while True:
 		try:
 			s = idiag.get()
 		except:
 			break
-		print "%-*s %-6d %-6d %*s:%-5d %*s:%-5d" % \
+		print "%-*s %-6d %-6d %*s:%-5d   %*s:%-5d   " % \
 		      (state_width, s.state(),
 		       s.receive_queue(), s.write_queue(),
 		       addr_width, s.saddr(), s.sport(),
@@ -70,9 +76,16 @@ def print_sockets(states, show_options, show_mem, show_protocol_info):
 		if show_options:
 			timer = s.timer()
 			if timer != "off":
-				print " timer:(%s,%s,%d)" % (timer,
-							     print_ms_timer(s),
-							     s.retransmissions()),
+				print "timer:(%s,%s,%d)" % (timer,
+							    print_ms_timer(s),
+							    s.retransmissions()),
+
+		if show_details:
+			uid = s.uid()
+			if uid:
+				print "uid:%d" % uid,
+			print "ino:%d sk:%x" % (s.inode(), s.sock()),
+
 		if show_mem:
 			try:
 				print "\n\t mem:(r%u,w%u,f%u,t%u)" % \
@@ -171,19 +184,21 @@ def main():
 		sys.exit(2)
 
 	show_options = False
+	show_details = False
 	show_mem = False
 	show_protocol_info = False
-	states = inet_diag.default_states;
+	states = inet_diag.default_states
+	resolve_ports = True
 
 	if not opts:
-		print_sockets(False, states)
+		print_sockets(states)
 		sys.exit(0)
 
 	for o, a in opts:
    		if o in ( "-V", "--version"):
 			print version
    		elif o in ( "-n", "--numeric"):
-			not_implemented(o)
+			resolve_ports = False
    		elif o in ( "-r", "--resolve"):
 			not_implemented(o)
    		elif o in ( "-a", "--all"):
@@ -193,7 +208,8 @@ def main():
    		elif o in ( "-o", "--options"):
 			show_options = True
    		elif o in ( "-e", "--extended"):
-			not_implemented(o)
+			show_options = True
+			show_details = True
    		elif o in ( "-m", "--memory"):
 			show_mem = True
    		elif o in ( "-p", "--processes"):
@@ -226,7 +242,8 @@ def main():
 			usage()
 			return
 
-	print_sockets(states, show_options, show_mem, show_protocol_info)
+	print_sockets(states, show_options, show_mem, show_protocol_info,
+		      show_details)
 
 if __name__ == '__main__':
     main()

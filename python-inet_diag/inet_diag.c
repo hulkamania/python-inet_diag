@@ -191,6 +191,12 @@ static PyObject *inet_socket__##name(struct inet_socket *self,	\
 				     PyObject *args __unused)	\
 { return Py_BuildValue("i", self->msg.field); }
 
+#define INET_SOCK__NET_INT_METHOD(name, field, doc)			\
+static char inet_socket__##name##_doc__[] = #name "() -- " doc;	\
+static PyObject *inet_socket__##name(struct inet_socket *self,	\
+				     PyObject *args __unused)	\
+{ return Py_BuildValue("i", ntohs(self->msg.field)); }
+
 #define INET_SOCK__EXT_INT_METHOD(name, ext, field, doc)	\
 static char inet_socket__##name##_doc__[] = #name "() -- " doc;	\
 static PyObject *inet_socket__##name(struct inet_socket *self,	\
@@ -204,10 +210,10 @@ static PyObject *inet_socket__##name(struct inet_socket *self,	\
 	return Py_BuildValue("l", self->ext_##ext->field); 	\
 }
 		
-INET_SOCK__INT_METHOD(dport, id.idiag_dport,
-		      "get internet socket destination port");
-INET_SOCK__INT_METHOD(sport, id.idiag_sport,
-		      "get internet socket source port");
+INET_SOCK__NET_INT_METHOD(dport, id.idiag_dport,
+			  "get internet socket destination port");
+INET_SOCK__NET_INT_METHOD(sport, id.idiag_sport,
+			  "get internet socket source port");
 INET_SOCK__INT_METHOD(bound_iface, id.idiag_if,
 		      "get interface this socket is bound to");
 INET_SOCK__INT_METHOD(family, idiag_family,

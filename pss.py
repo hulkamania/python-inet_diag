@@ -13,7 +13,7 @@
 #   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 #   General Public License for more details.
 
-import getopt, inet_diag, sys
+import getopt, inet_diag, os, procfs, re, sys
 
 version="0.1"
 
@@ -22,6 +22,9 @@ def not_implemented(o):
 
 state_width = 10
 addr_width = 18
+serv_width = 7
+screen_width = 80
+netid_width = 0
 
 def print_ms_timer(s):
 	timeout = s.timer_expiration()
@@ -50,35 +53,75 @@ def print_ms_timer(s):
 
 	return rc
 
+class socket_link:
+	def __init__(self, pid, fd):
+		self.pid = pid
+		self.fd	 = fd
+
 def print_sockets(states, show_options = False, show_mem = False,
-		  show_protocol_info = False, show_details = False):
+		  show_protocol_info = False, show_details = False,
+		  show_users = False):
+	if show_users:
+		ps = procfs.pidstats()
+		inode_re = re.compile(r"socket:\[(\d+)\]")
+		inodes = {}
+		for pid in ps.keys():
+			dirname = "/proc/%d/fd" % pid
+			try:
+				filenames = os.listdir(dirname)
+			except: # Process died
+				continue
+			for fd in filenames:
+				pathname = os.path.join(dirname, fd)
+				try:
+					linkto = os.readlink(pathname)
+				except:
+					break
+				inode_match = inode_re.match(linkto)
+				if not inode_match:
+					continue
+				inode = int(inode_match.group(1))
+				socket = socket_link(pid, int(fd))
+				if inodes.has_key(inode):
+					inodes[inode].append(socket)
+				else:
+					inodes[inode] = [ socket, ]
 	extensions = 0
 	if show_mem:
 		extensions |= inet_diag.EXT_MEMORY;
 	if show_protocol_info:
 		extensions |= inet_diag.EXT_PROTOCOL | inet_diag.EXT_CONGESTION;
 	idiag = inet_diag.create(states = states, extensions = extensions); 
-	print "%-*s %-6s %-6s %*s:%-5s   %*s:%-5s  " % \
+	print "%-*s %-6s %-6s %*s:%-*s %*s:%-*s" % \
 	      (state_width, "State",
 	       "Recv-Q", "Send-Q",
-	       addr_width, "Local Address", "Port",
-	       addr_width, "Peer Address", "Port")
+	       addr_width, "Local Address",
+	       serv_width, "Port",
+	       addr_width, "Peer Address",
+	       serv_width, "Port")
 	while True:
 		try:
 			s = idiag.get()
 		except:
 			break
-		print "%-*s %-6d %-6d %*s:%-5d   %*s:%-5d   " % \
+		print "%-*s %-6d %-6d %*s:%-*d %*s:%-*d " % \
 		      (state_width, s.state(),
 		       s.receive_queue(), s.write_queue(),
-		       addr_width, s.saddr(), s.sport(),
-		       addr_width, s.daddr(), s.dport()),
+		       addr_width, s.saddr(), serv_width, s.sport(),
+		       addr_width, s.daddr(), serv_width, s.dport()),
 		if show_options:
 			timer = s.timer()
 			if timer != "off":
 				print "timer:(%s,%s,%d)" % (timer,
 							    print_ms_timer(s),
 							    s.retransmissions()),
+		if show_users:
+			inode = s.inode()
+			if inodes.has_key(inode):
+				print "users:(" + \
+				      ",".join(map(lambda socket: '("%s",%d,%d)' % (ps[socket.pid]["stat"]["comm"],
+										    socket.pid, socket.fd),
+						   inodes[inode])) + ")",
 
 		if show_details:
 			uid = s.uid()
@@ -166,6 +209,8 @@ def usage():
        FILTER := [ state TCP-STATE ] [ EXPRESSION ]'''
 
 def main():
+	global serv_width, state_width, addr_width, serv_width, \
+	       screen_width, netid_width
 	try:
 		opts, args = getopt.getopt(sys.argv[1:],
 					   "hVnraloempis460tudwxf:A:F:",
@@ -187,6 +232,7 @@ def main():
 	show_details = False
 	show_mem = False
 	show_protocol_info = False
+	show_users = False
 	states = inet_diag.default_states
 	resolve_ports = True
 
@@ -199,6 +245,7 @@ def main():
 			print version
    		elif o in ( "-n", "--numeric"):
 			resolve_ports = False
+			serv_width = 5
    		elif o in ( "-r", "--resolve"):
 			not_implemented(o)
    		elif o in ( "-a", "--all"):
@@ -213,7 +260,7 @@ def main():
    		elif o in ( "-m", "--memory"):
 			show_mem = True
    		elif o in ( "-p", "--processes"):
-			not_implemented(o)
+			show_users = True
    		elif o in ( "-i", "--info"):
 			show_protocol_info = True
    		elif o in ( "-s", "--summary"):
@@ -242,8 +289,26 @@ def main():
 			usage()
 			return
 
+        addrp_width = screen_width
+        addrp_width -= netid_width + 1
+        addrp_width -= state_width + 1
+        addrp_width -= 14
+	if addrp_width & 1:
+		if netid_width:
+			netid_width += 1
+		elif state_width:
+			state_width += 1
+
+	addrp_width /= 2
+	addrp_width -= 1
+
+	if addrp_width < 15 + serv_width + 1:
+		addrp_width = 15 + serv_width + 1
+
+	addr_width = addrp_width - serv_width - 1
+
 	print_sockets(states, show_options, show_mem, show_protocol_info,
-		      show_details)
+		      show_details, show_users)
 
 if __name__ == '__main__':
     main()

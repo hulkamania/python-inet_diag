@@ -25,6 +25,18 @@ addr_width = 18
 serv_width = 7
 screen_width = 80
 netid_width = 0
+( TCP_DB,
+  DCCP_DB,
+  UDP_DB,
+  RAW_DB,
+  UNIX_DG_DB,
+  UNIX_ST_DB,
+  PACKET_DG_DB,
+  PACKET_R_DB,
+  NETLINK_DB,
+  MAX_DB ) = range(10)
+
+ALL_DB = ((1 << MAX_DB) - 1)
 
 def print_ms_timer(s):
 	timeout = s.timer_expiration()
@@ -58,7 +70,7 @@ class socket_link:
 		self.pid = pid
 		self.fd	 = fd
 
-def print_sockets(states, families, show_options = False, show_mem = False,
+def print_sockets(states, families, socktype, show_options = False, show_mem = False,
 		  show_protocol_info = False, show_details = False,
 		  show_users = False):
 	if show_users:
@@ -91,7 +103,8 @@ def print_sockets(states, families, show_options = False, show_mem = False,
 		extensions |= inet_diag.EXT_MEMORY;
 	if show_protocol_info:
 		extensions |= inet_diag.EXT_PROTOCOL | inet_diag.EXT_CONGESTION;
-	idiag = inet_diag.create(states = states, extensions = extensions); 
+	idiag = inet_diag.create(states = states, extensions = extensions,
+				 socktype = socktype); 
 	print "%-*s %-6s %-6s %*s:%-*s %*s:%-*s" % \
 	      (state_width, "State",
 	       "Recv-Q", "Send-Q",
@@ -230,18 +243,20 @@ def main():
 		print str(err)
 		sys.exit(2)
 
-	show_options = False
-	show_details = False
-	show_mem = False
-	show_protocol_info = False
-	show_users = False
 	states = inet_diag.default_states
 	families = (1 << socket.AF_INET) | (1 << socket.AF_INET6)
 	resolve_ports = True
 
 	if not opts:
-		print_sockets(states, families)
+		print_sockets(states, families, inet_diag.TCPDIAG_GETSOCK)
 		sys.exit(0)
+
+	show_options = False
+	show_details = False
+	show_mem = False
+	show_protocol_info = False
+	show_users = False
+	dbs = 0
 
 	for o, a in opts:
    		if o in ( "-V", "--version"):
@@ -275,15 +290,15 @@ def main():
    		elif o in ( "-0", "--packet"):
 			not_implemented(o)
    		elif o in ( "-t", "--tcp"):
-			not_implemented(o)
+			dbs |= (1 << TCP_DB)
    		elif o in ( "-u", "--udp"):
-			not_implemented(o)
+			dbs |= (1 << UDP_DB)
    		elif o in ( "-d", "--dccp"):
-			not_implemented(o)
+			dbs |= (1 << DCCP_DB)
    		elif o in ( "-w", "--raw"):
-			not_implemented(o)
+			dbs |= (1 << RAW_DB)
    		elif o in ( "-x", "--unix"):
-			not_implemented(o)
+			dbs |= (1 << UNIX_DB)
    		elif o in ( "-f", "--family"):
 			if a == "inet":
 				families = 1 << socket.AF_INET
@@ -313,8 +328,17 @@ def main():
 
 	addr_width = addrp_width - serv_width - 1
 
-	print_sockets(states, families, show_options, show_mem,
-		      show_protocol_info, show_details, show_users)
+	if dbs == 0 or dbs & (1 << TCP_DB):
+		print_sockets(states, families,
+			      inet_diag.TCPDIAG_GETSOCK, show_options,
+			      show_mem, show_protocol_info,
+			      show_details, show_users)
+
+	if dbs & (1 << DCCP_DB):
+		print_sockets(states, families,
+			      inet_diag.DCCPDIAG_GETSOCK, show_options,
+			      show_mem, show_protocol_info,
+			      show_details, show_users)
 
 if __name__ == '__main__':
     main()

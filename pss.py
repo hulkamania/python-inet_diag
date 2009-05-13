@@ -13,7 +13,7 @@
 #   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 #   General Public License for more details.
 
-import getopt, inet_diag, os, procfs, re, sys
+import getopt, inet_diag, os, procfs, re, socket, sys
 
 version="0.1"
 
@@ -58,7 +58,7 @@ class socket_link:
 		self.pid = pid
 		self.fd	 = fd
 
-def print_sockets(states, show_options = False, show_mem = False,
+def print_sockets(states, families, show_options = False, show_mem = False,
 		  show_protocol_info = False, show_details = False,
 		  show_users = False):
 	if show_users:
@@ -81,11 +81,11 @@ def print_sockets(states, show_options = False, show_mem = False,
 				if not inode_match:
 					continue
 				inode = int(inode_match.group(1))
-				socket = socket_link(pid, int(fd))
+				sock = socket_link(pid, int(fd))
 				if inodes.has_key(inode):
-					inodes[inode].append(socket)
+					inodes[inode].append(sock)
 				else:
-					inodes[inode] = [ socket, ]
+					inodes[inode] = [ sock, ]
 	extensions = 0
 	if show_mem:
 		extensions |= inet_diag.EXT_MEMORY;
@@ -104,6 +104,8 @@ def print_sockets(states, show_options = False, show_mem = False,
 			s = idiag.get()
 		except:
 			break
+		if not (families & (1 << s.family())):
+			continue
 		print "%-*s %-6d %-6d %*s:%-*d %*s:%-*d " % \
 		      (state_width, s.state(),
 		       s.receive_queue(), s.write_queue(),
@@ -119,8 +121,8 @@ def print_sockets(states, show_options = False, show_mem = False,
 			inode = s.inode()
 			if inodes.has_key(inode):
 				print "users:(" + \
-				      ",".join(map(lambda socket: '("%s",%d,%d)' % (ps[socket.pid]["stat"]["comm"],
-										    socket.pid, socket.fd),
+				      ",".join(map(lambda sock: '("%s",%d,%d)' % (ps[sock.pid]["stat"]["comm"],
+										  sock.pid, sock.fd),
 						   inodes[inode])) + ")",
 
 		if show_details:
@@ -234,10 +236,11 @@ def main():
 	show_protocol_info = False
 	show_users = False
 	states = inet_diag.default_states
+	families = (1 << socket.AF_INET) | (1 << socket.AF_INET6)
 	resolve_ports = True
 
 	if not opts:
-		print_sockets(states)
+		print_sockets(states, families)
 		sys.exit(0)
 
 	for o, a in opts:
@@ -266,9 +269,9 @@ def main():
    		elif o in ( "-s", "--summary"):
 			not_implemented(o)
    		elif o in ( "-4", "--ipv4"):
-			not_implemented(o)
+			families = 1 << socket.AF_INET
    		elif o in ( "-6", "--ipv6"):
-			not_implemented(o)
+			families = 1 << socket.AF_INET6
    		elif o in ( "-0", "--packet"):
 			not_implemented(o)
    		elif o in ( "-t", "--tcp"):
@@ -282,7 +285,10 @@ def main():
    		elif o in ( "-x", "--unix"):
 			not_implemented(o)
    		elif o in ( "-f", "--family"):
-			not_implemented(o)
+			if a == "inet":
+				families = 1 << socket.AF_INET
+			elif a == "inet6":
+				families = 1 << socket.AF_INET6
    		elif o in ( "-A", "--query"):
 			not_implemented(o)
 		else:
@@ -307,8 +313,8 @@ def main():
 
 	addr_width = addrp_width - serv_width - 1
 
-	print_sockets(states, show_options, show_mem, show_protocol_info,
-		      show_details, show_users)
+	print_sockets(states, families, show_options, show_mem,
+		      show_protocol_info, show_details, show_users)
 
 if __name__ == '__main__':
     main()

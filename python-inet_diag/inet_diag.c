@@ -47,19 +47,6 @@ static int parse_rtattr(struct rtattr *tb[], int max,
 }
 
 enum {
-	TCP_DB,
-	DCCP_DB,
-	UDP_DB,
-	RAW_DB,
-	UNIX_DG_DB,
-	UNIX_ST_DB,
-	PACKET_DG_DB,
-	PACKET_R_DB,
-	NETLINK_DB,
-	MAX_DB
-};
-
-enum {
 	SS_UNKNOWN,
 	SS_ESTABLISHED,
 	SS_SYN_SENT,
@@ -545,14 +532,15 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 {
 	int states = default_states;
 	int extensions = INET_DIAG_NONE;
-	static char *kwlist[] = { "states", "extensions", };
+	int socktype = TCPDIAG_GETSOCK;
+	static char *kwlist[] = { "states", "extensions", "socktype" };
 	struct inet_diag *self = PyObject_NEW(struct inet_diag,
 					      &inet_diag_type);
 	if (self == NULL)
 		return NULL;
 
-	if (!PyArg_ParseTupleAndKeywords(args, keywds, "|ii", kwlist,
-					 &states, &extensions))
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "|iii", kwlist,
+					 &states, &extensions, &socktype))
 		goto out_err;
 
 	self->socket = socket(AF_NETLINK, SOCK_RAW, NETLINK_INET_DIAG);
@@ -568,7 +556,7 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 	} req = {
 		.nlh = {
 			.nlmsg_len   = sizeof(req),
-			.nlmsg_type  = TCPDIAG_GETSOCK,
+			.nlmsg_type  = socktype,
 			.nlmsg_flags = NLM_F_ROOT | NLM_F_MATCH | NLM_F_REQUEST,
 			.nlmsg_seq   = 123456,
 		},
@@ -616,7 +604,6 @@ PyMODINIT_FUNC initinet_diag(void)
 {
 	PyObject *m;
 	m = Py_InitModule("inet_diag", python_inet_diag__methods);
-	PyModule_AddIntConstant(m, "TCP_DB", TCP_DB); /* Select TCP sockets. */
 	PyModule_AddIntConstant(m, "SS_ESTABLISHED", SS_ESTABLISHED);
 	PyModule_AddIntConstant(m, "SS_SYN_SENT",    SS_SYN_SENT);
 	PyModule_AddIntConstant(m, "SS_SYN_RECV",    SS_SYN_RECV);
@@ -638,4 +625,6 @@ PyMODINIT_FUNC initinet_diag(void)
 	PyModule_AddIntConstant(m, "PROTO_OPT_SACK", TCPI_OPT_SACK);
 	PyModule_AddIntConstant(m, "PROTO_OPT_WSCALE", TCPI_OPT_WSCALE);
 	PyModule_AddIntConstant(m, "PROTO_OPT_ECN", TCPI_OPT_ECN);
+	PyModule_AddIntConstant(m, "TCPDIAG_GETSOCK", TCPDIAG_GETSOCK);
+	PyModule_AddIntConstant(m, "DCCPDIAG_GETSOCK", DCCPDIAG_GETSOCK);
 }

@@ -32,6 +32,10 @@
 #endif
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
+#ifndef NETLINK_INET_DIAG
+#define NETLINK_INET_DIAG 4
+#endif
+
 /* From libnetlink */
 static int parse_rtattr(struct rtattr *tb[], int max,
 			struct rtattr *rta, int len)

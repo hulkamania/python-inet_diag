@@ -43,5 +43,5 @@ rm -rf %{buildroot}
 %endif
 
 %changelog
-* Mon Apr 27 2009 Arnaldo Carvalho de Melo <acme@redhat.com> - 0.1-1
+* Wed May 13 2009 * Arnaldo Carvalho de Melo <acme@redhat.com> - 0.1-1
 - Initial package

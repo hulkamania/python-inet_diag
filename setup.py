@@ -11,5 +11,5 @@ setup(name='inet_diag',
       description='Python module to interface with inet_diag',
       author='Arnaldo Carvalho de Melo',
       author_email='acme@redhat.com',
-      url='http://fedoraproject.org/wiki/python-inet_diag',
+      url='https://rt.wiki.kernel.org/index.php/Tuna',
       ext_modules=[inet_diag])

@@ -5,8 +5,8 @@ Summary: Ethernet settings python bindings
 Name: python-inet_diag
 Version: 0.1
 Release: 1%{?dist}
-URL: http://git.kernel.org/?p=linux/kernel/git/acme/python-inet_diag.git
-Source: http://userweb.kernel.org/~acme/python-inet_diag/%{name}-%{version}.tar.bz2
+URL: https://rt.wiki.kernel.org/index.php/Tuna
+Source: https://www.kernel.org/pub/software/libs/python/%{name}/%{name}-%{version}.tar.bz2
 License: GPLv2
 Group: System Environment/Libraries
 BuildRequires: python-devel

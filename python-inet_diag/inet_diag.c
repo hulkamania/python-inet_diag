@@ -607,12 +607,12 @@ out_err:
 
 struct inet_diag {
 	PyObject_HEAD
-	int		socket;		/* NETLINK socket */
+	int                socket;		/* NETLINK socket */
     char               *bytecode;   /* NETLINK filter */
     struct diag_filter *filter;     /* NETLINK filter */
-	char		buf[8192];
-	struct nlmsghdr *h;
-	size_t		len;
+	char               buf[8192];
+	struct             nlmsghdr *h;
+	size_t             len;
 };
 
 /* destructor */
@@ -620,7 +620,9 @@ static void inet_diag__dealloc(struct inet_diag *self)
 {
 	close(self->socket);
     clear_users();
-    free(self->bytecode);
+    if ( self->bytecode != NULL ) {
+        free(self->bytecode);
+    }
 	PyObject_Del(self);
 }
 
@@ -1118,6 +1120,8 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
         iov[2] = (struct iovec){ self->bytecode, filter_len };
 
         req.nlh.nlmsg_len += RTA_LENGTH(filter_len);
+    } else {
+        self->bytecode = NULL;
     }
 
 	struct msghdr msg = {

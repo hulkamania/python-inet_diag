@@ -26,18 +26,6 @@
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <linux/inet_diag.h>
-#include <linux/sock_diag.h>
-
-#include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <string.h>
-#include <netdb.h>
-#include <dirent.h>
-#include <fnmatch.h>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-
 #include "diag_filter.h"
 #ifndef __unused
 #define __unused __attribute__ ((unused))
@@ -753,11 +741,11 @@ static PyTypeObject inet_diag_type = {
 
 struct aafilter
 {
-    int               family;
-    int               mask;
-    unsigned long int prefix;
-    int               port;
-    struct aafilter   *next;
+    int family;
+	int	mask;
+	unsigned long int prefix;
+    int port;
+    struct aafilter *next;
 };
 
 static void filter_patch(char *a, int len, int reloc)
@@ -775,126 +763,126 @@ static void filter_patch(char *a, int len, int reloc)
 
 static int filter_bytecompile(struct diag_filter *f, char **bytecode)
 {
-    switch (f->type) {
-        case DIAG_BC_AUTO:
-    {
-        if (!(*bytecode=malloc(4))) abort();
-        ((struct inet_diag_bc_op*)*bytecode)[0] = (struct inet_diag_bc_op){ INET_DIAG_BC_AUTO, 4, 8 };
-        return 4;
-    }
-        case DIAG_BC_D_COND:
-        case DIAG_BC_S_COND:
-    {
-        struct aafilter *a = (void*)f->pred;
-        struct aafilter *b;
-        char *ptr;
-        int  code = (f->type == DIAG_BC_D_COND ? INET_DIAG_BC_D_COND : INET_DIAG_BC_S_COND);
-        int len = 0;
+	switch (f->type) {
+		case DIAG_BC_AUTO:
+	{
+		if (!(*bytecode=malloc(4))) abort();
+		((struct inet_diag_bc_op*)*bytecode)[0] = (struct inet_diag_bc_op){ INET_DIAG_BC_AUTO, 4, 8 };
+		return 4;
+	}
+		case DIAG_BC_D_COND:
+		case DIAG_BC_S_COND:
+	{
+		struct aafilter *a = (void*)f->pred;
+		struct aafilter *b;
+		char *ptr;
+		int  code = (f->type == DIAG_BC_D_COND ? INET_DIAG_BC_D_COND : INET_DIAG_BC_S_COND);
+		int len = 0;
 
-        for (b=a; b; b=b->next) {
-            len += 4 + sizeof(struct inet_diag_hostcond);
-            if (a->family == AF_INET6)
-                len += 16;
-            else
-                len += 4;
-            if (b->next)
-                len += 4;
-        }
-        if (!(ptr = malloc(len))) abort();
-        *bytecode = ptr;
-        for (b=a; b; b=b->next) {
-            struct inet_diag_bc_op *op = (struct inet_diag_bc_op *)ptr;
-            int alen = (a->family == AF_INET6 ? 16 : 4);
-            int oplen = alen + 4 + sizeof(struct inet_diag_hostcond);
-            struct inet_diag_hostcond *cond = (struct inet_diag_hostcond*)(ptr+4);
+		for (b=a; b; b=b->next) {
+			len += 4 + sizeof(struct inet_diag_hostcond);
+			if (a->family == AF_INET6)
+				len += 16;
+			else
+				len += 4;
+			if (b->next)
+				len += 4;
+		}
+		if (!(ptr = malloc(len))) abort();
+		*bytecode = ptr;
+		for (b=a; b; b=b->next) {
+			struct inet_diag_bc_op *op = (struct inet_diag_bc_op *)ptr;
+			int alen = (a->family == AF_INET6 ? 16 : 4);
+			int oplen = alen + 4 + sizeof(struct inet_diag_hostcond);
+			struct inet_diag_hostcond *cond = (struct inet_diag_hostcond*)(ptr+4);
 
-            *op = (struct inet_diag_bc_op){ code, oplen, oplen+4 };
-            cond->family = a->family;
-            cond->port = a->port;
-            cond->prefix_len = a->mask;
-            memcpy(cond->addr, &a->prefix, alen);
-            ptr += oplen;
-            if (b->next) {
-                op = (struct inet_diag_bc_op *)ptr;
-                *op = (struct inet_diag_bc_op){ INET_DIAG_BC_JMP, 4, len - (ptr-*bytecode)};
-                ptr += 4;
-            }
-        }
-        return ptr - *bytecode;
-    }
-        case DIAG_BC_D_GE:
-    {
-        struct aafilter *x = (void*)f->pred;
-        if (!(*bytecode=malloc(8))) abort();
-        ((struct inet_diag_bc_op*)*bytecode)[0] = (struct inet_diag_bc_op){ INET_DIAG_BC_D_GE, 8, 12 };
-        ((struct inet_diag_bc_op*)*bytecode)[1] = (struct inet_diag_bc_op){ 0, 0, x->port };
-        return 8;
-    }
-        case DIAG_BC_D_LE:
-    {
-        struct aafilter *x = (void*)f->pred;
-        if (!(*bytecode=malloc(8))) abort();
-        ((struct inet_diag_bc_op*)*bytecode)[0] = (struct inet_diag_bc_op){ INET_DIAG_BC_D_LE, 8, 12 };
-        ((struct inet_diag_bc_op*)*bytecode)[1] = (struct inet_diag_bc_op){ 0, 0, x->port };
-        return 8;
-    }
-        case DIAG_BC_S_GE:
-    {
-        struct aafilter *x = (void*)f->pred;
-        if (!(*bytecode=malloc(8))) abort();
-        ((struct inet_diag_bc_op*)*bytecode)[0] = (struct inet_diag_bc_op){ INET_DIAG_BC_S_GE, 8, 12 };
-        ((struct inet_diag_bc_op*)*bytecode)[1] = (struct inet_diag_bc_op){ 0, 0, x->port };
-        return 8;
-    }
-        case DIAG_BC_S_LE:
-    {
-        struct aafilter *x = (void*)f->pred;
-        if (!(*bytecode=malloc(8))) abort();
-        ((struct inet_diag_bc_op*)*bytecode)[0] = (struct inet_diag_bc_op){ INET_DIAG_BC_S_LE, 8, 12 };
-        ((struct inet_diag_bc_op*)*bytecode)[1] = (struct inet_diag_bc_op){ 0, 0, x->port };
-        return 8;
-    }
+			*op = (struct inet_diag_bc_op){ code, oplen, oplen+4 };
+			cond->family = a->family;
+			cond->port = a->port;
+			cond->prefix_len = a->mask;
+			memcpy(cond->addr, &a->prefix, alen);
+			ptr += oplen;
+			if (b->next) {
+				op = (struct inet_diag_bc_op *)ptr;
+				*op = (struct inet_diag_bc_op){ INET_DIAG_BC_JMP, 4, len - (ptr-*bytecode)};
+				ptr += 4;
+			}
+		}
+		return ptr - *bytecode;
+	}
+		case DIAG_BC_D_GE:
+	{
+		struct aafilter *x = (void*)f->pred;
+		if (!(*bytecode=malloc(8))) abort();
+		((struct inet_diag_bc_op*)*bytecode)[0] = (struct inet_diag_bc_op){ INET_DIAG_BC_D_GE, 8, 12 };
+		((struct inet_diag_bc_op*)*bytecode)[1] = (struct inet_diag_bc_op){ 0, 0, x->port };
+		return 8;
+	}
+		case DIAG_BC_D_LE:
+	{
+		struct aafilter *x = (void*)f->pred;
+		if (!(*bytecode=malloc(8))) abort();
+		((struct inet_diag_bc_op*)*bytecode)[0] = (struct inet_diag_bc_op){ INET_DIAG_BC_D_LE, 8, 12 };
+		((struct inet_diag_bc_op*)*bytecode)[1] = (struct inet_diag_bc_op){ 0, 0, x->port };
+		return 8;
+	}
+		case DIAG_BC_S_GE:
+	{
+		struct aafilter *x = (void*)f->pred;
+		if (!(*bytecode=malloc(8))) abort();
+		((struct inet_diag_bc_op*)*bytecode)[0] = (struct inet_diag_bc_op){ INET_DIAG_BC_S_GE, 8, 12 };
+		((struct inet_diag_bc_op*)*bytecode)[1] = (struct inet_diag_bc_op){ 0, 0, x->port };
+		return 8;
+	}
+		case DIAG_BC_S_LE:
+	{
+		struct aafilter *x = (void*)f->pred;
+		if (!(*bytecode=malloc(8))) abort();
+		((struct inet_diag_bc_op*)*bytecode)[0] = (struct inet_diag_bc_op){ INET_DIAG_BC_S_LE, 8, 12 };
+		((struct inet_diag_bc_op*)*bytecode)[1] = (struct inet_diag_bc_op){ 0, 0, x->port };
+		return 8;
+	}
 
-        case DIAG_FILTER_AND:
-    {
-        char *a1, *a2, *a, l1, l2;
-        l1 = filter_bytecompile(f->pred, &a1);
-        l2 = filter_bytecompile(f->post, &a2);
-        if (!(a = malloc(l1+l2))) abort();
-        memcpy(a, a1, l1);
-        memcpy(a+l1, a2, l2);
-        free(a1); free(a2);
-        filter_patch(a, l1, l2);
-        *bytecode = a;
-        return l1+l2;
-    }
-        case DIAG_FILTER_OR:
-    {
-        char *a1, *a2, *a, l1, l2;
-        l1 = filter_bytecompile(f->pred, &a1);
-        l2 = filter_bytecompile(f->post, &a2);
-        if (!(a = malloc(l1+l2+4))) abort();
-        memcpy(a, a1, l1);
-        memcpy(a+l1+4, a2, l2);
-        free(a1); free(a2);
-        *(struct inet_diag_bc_op*)(a+l1) = (struct inet_diag_bc_op){ INET_DIAG_BC_JMP, 4, l2+4 };
-        *bytecode = a;
-        return l1+l2+4;
-    }
-        case DIAG_FILTER_NOT:
-    {
-        char *a1, *a, l1;
-        l1 = filter_bytecompile(f->pred, &a1);
-        if (!(a = malloc(l1+4))) abort();
-        memcpy(a, a1, l1);
-        free(a1);
-        *(struct inet_diag_bc_op*)(a+l1) = (struct inet_diag_bc_op){ INET_DIAG_BC_JMP, 4, 8 };
-        *bytecode = a;
-        return l1+4;
-    }
-        default:
-        abort();
-    }
+		case DIAG_FILTER_AND:
+	{
+		char *a1, *a2, *a, l1, l2;
+		l1 = filter_bytecompile(f->pred, &a1);
+		l2 = filter_bytecompile(f->post, &a2);
+		if (!(a = malloc(l1+l2))) abort();
+		memcpy(a, a1, l1);
+		memcpy(a+l1, a2, l2);
+		free(a1); free(a2);
+		filter_patch(a, l1, l2);
+		*bytecode = a;
+		return l1+l2;
+	}
+		case DIAG_FILTER_OR:
+	{
+		char *a1, *a2, *a, l1, l2;
+		l1 = filter_bytecompile(f->pred, &a1);
+		l2 = filter_bytecompile(f->post, &a2);
+		if (!(a = malloc(l1+l2+4))) abort();
+		memcpy(a, a1, l1);
+		memcpy(a+l1+4, a2, l2);
+		free(a1); free(a2);
+		*(struct inet_diag_bc_op*)(a+l1) = (struct inet_diag_bc_op){ INET_DIAG_BC_JMP, 4, l2+4 };
+		*bytecode = a;
+		return l1+l2+4;
+	}
+		case DIAG_FILTER_NOT:
+	{
+		char *a1, *a, l1;
+		l1 = filter_bytecompile(f->pred, &a1);
+		if (!(a = malloc(l1+4))) abort();
+		memcpy(a, a1, l1);
+		free(a1);
+		*(struct inet_diag_bc_op*)(a+l1) = (struct inet_diag_bc_op){ INET_DIAG_BC_JMP, 4, 8 };
+		*bytecode = a;
+		return l1+4;
+	}
+		default:
+		abort();
+	}
 }
 
 /* constructor */
@@ -911,25 +899,24 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 {
 	int states = default_states;
 	int extensions = INET_DIAG_NONE;
-    int socktype = IPPROTO_TCP;
-    const char *src;
-    const char *dst;
-    int sport  = -1;
-    int dport  = -1;
-    int le_spt = -1;
-    int le_dpt = -1;
-    int ge_spt = -1;
-    int ge_dpt = -1;
-    int proc   = 0;
-    int join   = DIAG_FILTER_AND;
-    static char *kwlist[] = { "states", "extensions", "socktype", "src", "dst", "sport", "dport", "le_spt", "le_dpt", "ge_spt", "ge_dpt", "join", "proc" };
+	int socktype = TCPDIAG_GETSOCK;
+	const char *src;
+	const char *dst;
+	int sport  = -1;
+	int dport  = -1;
+	int le_spt = -1;
+	int le_dpt = -1;
+	int ge_spt = -1;
+	int ge_dpt = -1;
+	int join   = DIAG_FILTER_AND;
+	static char *kwlist[] = { "states", "extensions", "socktype", "src", "dst", "sport", "dport", "le_spt", "le_dpt", "ge_spt", "ge_dpt", "join" };
 	struct inet_diag *self = PyObject_NEW(struct inet_diag,
 					      &inet_diag_type);
 	if (self == NULL)
 		return NULL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, keywds, "|iiissiiiiiiii", kwlist,
-                     &states, &extensions, &socktype, &src, &dst, &sport, &dport, &le_spt, &le_dpt, &ge_spt, &ge_dpt, &join, &proc))
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "|iiissiiiiiii", kwlist,
+					 &states, &extensions, &socktype, &src, &dst, &sport, &dport, &le_spt, &le_dpt, &ge_spt, &ge_dpt, &join))
 		goto out_err;
 
     /* TODO: have different levels of process identification */
@@ -964,171 +951,163 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 		},
 	};
 
-    // filter preparation
-    struct diag_filter *filter;
-    int f_exists = 0;
-    if ( src != NULL && sport != -1 ) {
-        struct in_addr in_src = {};
-        inet_aton(src, &in_src);
+	// filter preparation
+	struct diag_filter *filter;
+	int f_exists = 0;
+	if ( src != NULL && sport != -1 ) {
+		struct in_addr in_src = {};
+		inet_aton(src, &in_src);
 
-        filter = &(struct diag_filter){
-            .type = DIAG_BC_S_COND,
-            .pred = (void*)&(struct aafilter){
-                .family = AF_INET,
-                .mask   = 32,
-                .prefix = in_src.s_addr,
-                .port   = sport,
-                .next   = NULL,
-            },
-            .post = NULL
-        };
-        f_exists = 1;
-    }
+		filter = &(struct diag_filter){
+			.type   = DIAG_BC_S_COND,
+			.pred   = (void*)&(struct aafilter){
+				.family = AF_INET,
+				.mask   = 32,
+				.prefix = in_src.s_addr,
+				.port   = sport,
+				.next   = NULL,
+			}
+		};
+		f_exists = 1;
+	}
 
-    if ( dst != NULL && dport != -1 ) {
-        struct in_addr in_dst = {};
-        inet_aton(dst, &in_dst);
+	if ( dst != NULL && dport != -1 ) {
+		struct in_addr in_dst = {};
+		inet_aton(dst, &in_dst);
 
-        struct diag_filter tmp_dst = (struct diag_filter){
-            .type = DIAG_BC_D_COND,
-            .pred = (void*)&(struct aafilter){
-                .family = AF_INET,
-                .mask   = 32,
-                .prefix = in_dst.s_addr,
-                .port   = dport,
-                .next   = NULL,
-            },
-            .post = NULL
-        };
+		struct diag_filter tmp_dst = (struct diag_filter){
+			.type   = DIAG_BC_D_COND,
+			.pred   = (void*)&(struct aafilter){
+				.family = AF_INET,
+				.mask   = 32,
+				.prefix = in_dst.s_addr,
+				.port   = dport,
+				.next   = NULL,
+			}
+		};
 
-        if ( f_exists != 0 ) {
-            filter = &(struct diag_filter){
-                .type = join,
-                .pred = filter,
-                .post = &tmp_dst,
-            };
-        } else {
-            filter   = &tmp_dst;
-            f_exists = 1;
-        }
-    }
+		if ( f_exists != 0 ) {
+			filter = &(struct diag_filter){
+				.type = join,
+				.pred = filter,
+				.post = &tmp_dst,
+			};
+		} else {
+			filter   = &tmp_dst;
+			f_exists = 1;
+		}
+	}
 
-    if ( le_spt != -1 ) {
-        struct diag_filter tmp_le_spt = {
-            .type = DIAG_BC_S_LE,
-            .pred = (void*)&(struct aafilter){
-                .port = le_spt,
-                .next = NULL,
-            },
-            .post = NULL
-        };
+	if ( le_spt != -1 ) {
+		struct diag_filter tmp_le_spt = {
+			.type  = DIAG_BC_S_LE,
+			.pred  = (void*)&(struct aafilter){
+				.port = le_spt,
+				.next = NULL,
+			}
+		};
 
-        if ( f_exists != 0 ) {
-            filter = &(struct diag_filter){
-                .type = join,
-                .pred = filter,
-                .post = &tmp_le_spt,
-            };
-        } else {
-            filter   = &tmp_le_spt;
-            f_exists = 1;
-        }
-    }
+		if ( f_exists != 0 ) {
+			filter = &(struct diag_filter){
+				.type = join,
+				.pred = filter,
+				.post = &tmp_le_spt,
+			};
+		} else {
+			filter   = &tmp_le_spt;
+			f_exists = 1;
+		}
+	}
 
-    if ( le_dpt != -1 ) {
-        struct diag_filter tmp_le_dpt = {
-            .type = DIAG_BC_D_LE,
-            .pred = (void*)&(struct aafilter){
-                .port = le_dpt,
-                .next = NULL,
-            },
-            .post = NULL
-        };
+	if ( le_dpt != -1 ) {
+		struct diag_filter tmp_le_dpt = {
+			.type   = DIAG_BC_D_LE,
+			.pred   = (void*)&(struct aafilter){
+				.port   = le_dpt,
+				.next   = NULL,
+			}
+		};
 
-        if ( f_exists != 0 ) {
-            filter = &(struct diag_filter){
-                .type = join,
-                .pred = filter,
-                .post = &tmp_le_dpt,
-            };
-        } else {
-            filter   = &tmp_le_dpt;
-            f_exists = 1;
-        }
-    }
+		if ( f_exists != 0 ) {
+			filter = &(struct diag_filter){
+				.type = join,
+				.pred = filter,
+				.post = &tmp_le_dpt,
+			};
+		} else {
+			filter   = &tmp_le_dpt;
+			f_exists = 1;
+		}
+	}
 
-    if ( ge_spt != -1 ) {
-        struct diag_filter tmp_ge_spt = {
-            .type = DIAG_BC_S_GE,
-            .pred = (void*)&(struct aafilter){
-                .port = ge_spt,
-                .next = NULL,
-            },
-            .post = NULL
-        };
+	if ( ge_spt != -1 ) {
+		struct diag_filter tmp_ge_spt = {
+			.type   = DIAG_BC_S_GE,
+			.pred   = (void*)&(struct aafilter){
+				.port   = ge_spt,
+				.next   = NULL,
+			}
+		};
 
-        if ( f_exists != 0 ) {
-            filter = &(struct diag_filter){
-                .type = join,
-                .pred = filter,
-                .post = &tmp_ge_spt,
-            };
-        } else {
-            filter   = &tmp_ge_spt;
-            f_exists = 1;
-        }
-    }
+		if ( f_exists != 0 ) {
+			filter = &(struct diag_filter){
+				.type = join,
+				.pred = filter,
+				.post = &tmp_ge_spt,
+			};
+		} else {
+			filter   = &tmp_ge_spt;
+			f_exists = 1;
+		}
+	}
 
-    if ( ge_dpt != -1 ) {
-        struct diag_filter tmp_ge_dpt = {
-            .type = DIAG_BC_D_GE,
-            .pred = (void*)&(struct aafilter){
-                .port = ge_dpt,
-                .next = NULL,
-            },
-            .post = NULL
-        };
+	if ( ge_dpt != -1 ) {
+		struct diag_filter tmp_ge_dpt = {
+			.type   = DIAG_BC_D_GE,
+			.pred   = (void*)&(struct aafilter){
+				.port   = ge_dpt,
+				.next   = NULL,
+			}
+		};
 
-        if ( f_exists != 0 ) {
-            filter = &(struct diag_filter){
-                .type = join,
-                .pred = filter,
-                .post = &tmp_ge_dpt,
-            };
-        } else {
-            filter   = &tmp_ge_dpt;
-            f_exists = 1;
-        }
-    }
+		if ( f_exists != 0 ) {
+			filter = &(struct diag_filter){
+				.type = join,
+				.pred = filter,
+				.post = &tmp_ge_dpt,
+			};
+		} else {
+			filter   = &tmp_ge_dpt;
+			f_exists = 1;
+		}
+	}
 
-    struct iovec iov[3];
-    iov[0] = (struct iovec){
-			.iov_base = &req,
-			.iov_len  = sizeof(req),
-	};
+	struct iovec iov[3];
+	iov[0] = (struct iovec){
+            .iov_base = &req,
+            .iov_len  = sizeof(req),
+    };
 
-    // append the filter    
+	// append the filter	
     struct rtattr rta; 
-
+	char *filter_mem = NULL;
     int filter_len = 0;
-    if ( f_exists != 0 ) {
-        filter_len   = filter_bytecompile(filter, &(self->bytecode));
-        rta.rta_type = INET_DIAG_REQ_BYTECODE;
-        rta.rta_len  = RTA_LENGTH(filter_len);
+	if ( f_exists != 0 ) {
+		filter_len   = filter_bytecompile(filter, &filter_mem);
+    	rta.rta_type = INET_DIAG_REQ_BYTECODE;
+    	rta.rta_len  = RTA_LENGTH(filter_len);
 
-        iov[1] = (struct iovec){ &rta, sizeof(rta) };
-        iov[2] = (struct iovec){ self->bytecode, filter_len };
+    	iov[1] = (struct iovec){ &rta, sizeof(rta) };
+    	iov[2] = (struct iovec){ filter_mem, filter_len };
 
-        req.nlh.nlmsg_len += RTA_LENGTH(filter_len);
-    } else {
-        self->bytecode = NULL;
-    }
+    	req.nlh.nlmsg_len += RTA_LENGTH(filter_len);
+	}
 
 	struct msghdr msg = {
 		.msg_name    = &nladdr,
 		.msg_namelen = sizeof(nladdr),
 		.msg_iov     = iov,
-        .msg_iovlen  = ( f_exists != 0 ? 3 : 1 ),
+		.msg_iovlen  = ( f_exists != 0 ? 3 : 1 ),
 	};
 	if (sendmsg(self->socket, &msg, 0) < 0)
 		goto out_err;
@@ -1154,16 +1133,15 @@ static struct PyMethodDef python_inet_diag__methods[] = {
 PyMODINIT_FUNC initinet_diag(void)
 {
 	PyObject *m;
-    m = Py_InitModule3("inet_diag", python_inet_diag__methods, "Example:\n\n\
-    > import inet_diag\n\
-    > from socket import IPPROTO_TCP\n\
-    > idiag = inet_diag.create(states = inet_diag.default_states, extensions = inet_diag.EXT_MEMORY, socktype = IPPROTO_TCP, le_dpt = 500)\n\
-    > while True:\n\
-    >     try:\n\
-    >         s = idiag.get()\n\
-    >     except:\n\
-    >         break\n\
-    >     print s");
+	m = Py_InitModule3("inet_diag", python_inet_diag__methods, "Example:\n\n\
+	> import inet_diag\n\
+	> idiag = inet_diag.create(states = inet_diag.default_states, extensions = inet_diag.EXT_MEMORY, socktype = inet_diag.TCPDIAG_GETSOCK, le_dpt = 500)\n\
+	> while True:\n\
+	>     try:\n\
+	>         s = idiag.get()\n\
+	>     except:\n\
+	>         break\n\
+	>     print s");
 	PyModule_AddIntConstant(m, "SS_ESTABLISHED", SS_ESTABLISHED);
 	PyModule_AddIntConstant(m, "SS_SYN_SENT",    SS_SYN_SENT);
 	PyModule_AddIntConstant(m, "SS_SYN_RECV",    SS_SYN_RECV);
@@ -1188,6 +1166,6 @@ PyMODINIT_FUNC initinet_diag(void)
 	PyModule_AddIntConstant(m, "PROTO_OPT_ECN", TCPI_OPT_ECN);
 	PyModule_AddIntConstant(m, "TCPDIAG_GETSOCK", TCPDIAG_GETSOCK);
 	PyModule_AddIntConstant(m, "DCCPDIAG_GETSOCK", DCCPDIAG_GETSOCK);
-    PyModule_AddIntConstant(m, "DIAG_FILTER_AND", DIAG_FILTER_AND);
-    PyModule_AddIntConstant(m, "DIAG_FILTER_OR", DIAG_FILTER_OR);
+	PyModule_AddIntConstant(m, "DIAG_FILTER_AND", DIAG_FILTER_AND);
+	PyModule_AddIntConstant(m, "DIAG_FILTER_OR", DIAG_FILTER_OR);
 }

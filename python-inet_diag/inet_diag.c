@@ -26,6 +26,7 @@
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <linux/inet_diag.h>
+#include <linux/sock_diag.h>
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -116,7 +117,7 @@ struct inet_socket {
 	struct inet_diag_msg msg;
 	struct inet_diag_meminfo *ext_memory;
 	struct tcp_info *ext_protocol;
-    struct user_ent *proc;
+	struct user_ent *proc;
 	char *ext_congestion;
 };
 
@@ -212,7 +213,7 @@ static void user_ent_hash_build(void)
 
     while ((d = readdir(dir)) != NULL) {
         struct dirent *d1;
-        char process[16];
+        char process[0];
         int pid, pos;
         DIR *dir1;
         char crap;
@@ -224,8 +225,6 @@ static void user_ent_hash_build(void)
         pos = strlen(name);
         if ((dir1 = opendir(name)) == NULL)
             continue;
-
-        process[0] = '\0';
 
         while ((d1 = readdir(dir1)) != NULL) {
             const char *pattern = "socket:[";
@@ -249,17 +248,6 @@ static void user_ent_hash_build(void)
 
             sscanf(lnk, "socket:[%u]", &ino);
 
-            if (process[0] == '\0') {
-                char tmp[1024];
-                FILE *fp;
-
-                snprintf(tmp, sizeof(tmp), "%s/%d/stat", root, pid);
-                if ((fp = fopen(tmp, "r")) != NULL) {
-                    fscanf(fp, "%*d (%[^)])", process);
-                    fclose(fp);
-                }
-            }
-
             user_ent_add(ino, process, pid, fd);
         }
         closedir(dir1);
@@ -267,37 +255,36 @@ static void user_ent_hash_build(void)
     closedir(dir);
 }
 
-static int find_users(unsigned ino, char *buf, int buflen)
+static int find_users(unsigned ino, struct user_ent *found)
 {
     struct user_ent *p;
     int cnt = 0;
-    char *ptr;
 
     if (!ino)
         return 0;
 
     p = user_ent_hash[user_ent_hashfn(ino)];
-    ptr = buf;
     while (p) {
         if (p->ino != ino)
             goto next;
 
-        if (ptr - buf >= buflen - 1)
-            break;
+		found->ino = p->ino;
+		found->fd  = p->fd;
+		found->pid = p->pid;
 
-		/* TODO: return 'p' */
-        snprintf(ptr, buflen - (ptr - buf),
-             "(\"%s\",%d,%d),",
-             p->process, p->pid, p->fd);
-        ptr += strlen(ptr);
         cnt++;
-
     next:
         p = p->next;
     }
 
-    if (ptr != buf)
-        ptr[-1] = '\0';
+	//get the full process path
+	char tmp[1024];
+	// TODO: this should only be determined once in the whole file
+    const char *root = getenv("PROC_ROOT") ? : "/proc/";
+
+	snprintf(tmp, sizeof(tmp), "%s/%d/exe", root, found->pid);
+	char *bin_path = canonicalize_file_name(tmp);
+	strcpy(found->process, bin_path);
 
     return cnt;
 }
@@ -349,14 +336,14 @@ static PyObject *inet_socket__congestion_algorithm(struct inet_socket *self,
 static char inet_socket__process_doc__[] =
 "process() -- get name of process";
 static PyObject *inet_socket__process(struct inet_socket *self,
-                    PyObject *args __unused)
+				    PyObject *args __unused)
 {
-    if (self->proc == NULL) {
-        PyErr_SetString(PyExc_OSError,          
-                "no process found or proc not specified");
-        return NULL;
-    }
-    return PyString_FromString(self->proc->process);
+	if (self->proc == NULL) {
+		PyErr_SetString(PyExc_OSError,			
+				"no process found or proc not specified");
+		return NULL;
+	}
+	return PyString_FromString(self->proc->process);
 }
 
 #define INET_SOCK__STR_METHOD(name, field, table, doc)		\
@@ -389,11 +376,11 @@ static PyObject *inet_socket__##name(struct inet_socket *self,	\
 	}							\
 	return Py_BuildValue("l", self->ext_##ext->field); 	\
 }
-		
-#define INET_SOCK__PROC_INT_METHOD(name, field, doc)            \
-static char inet_socket__##name##_doc__[] = #name "() -- " doc; \
-static PyObject *inet_socket__##name(struct inet_socket *self,  \
-                     PyObject *args __unused)   \
+
+#define INET_SOCK__PROC_INT_METHOD(name, field, doc)			\
+static char inet_socket__##name##_doc__[] = #name "() -- " doc;	\
+static PyObject *inet_socket__##name(struct inet_socket *self,	\
+				     PyObject *args __unused)	\
 { return Py_BuildValue("i", self->proc->field); }
 
 INET_SOCK__NET_INT_METHOD(dport, id.idiag_dport,
@@ -452,9 +439,9 @@ INET_SOCK__EXT_INT_METHOD(cwnd, protocol, tcpi_snd_cwnd,
 INET_SOCK__EXT_INT_METHOD(ssthresh, protocol, tcpi_snd_ssthresh,
 			  "get socket slow start threshold");
 INET_SOCK__PROC_INT_METHOD(pid, pid,
-              "get process id");
+			  "get process id");
 INET_SOCK__PROC_INT_METHOD(fd, fd,
-              "get file descriptor");
+			  "get file descriptor");
 
 #define INET_SOCK__METHOD(name)	{			\
 	.ml_name  = #name,				\
@@ -494,9 +481,9 @@ static struct PyMethodDef inet_socket__methods[] = {
 	INET_SOCK__METHOD(ato),
 	INET_SOCK__METHOD(cwnd),
 	INET_SOCK__METHOD(ssthresh),
-    INET_SOCK__METHOD(process),
-    INET_SOCK__METHOD(pid),
-    INET_SOCK__METHOD(fd),
+	INET_SOCK__METHOD(process),
+	INET_SOCK__METHOD(pid),
+	INET_SOCK__METHOD(fd),
 	{ .ml_name = NULL, }
 };
 
@@ -541,7 +528,7 @@ static PyObject *inet_socket__new(struct inet_diag_msg *r, int nlmsg_len, struct
 	self->ext_memory = NULL;
 	self->ext_protocol = NULL;
 	self->ext_congestion = NULL;
-    self->proc = NULL;
+	self->proc = NULL;
 
 	if (nlmsg_len) {
 		struct rtattr *tb[INET_DIAG_MAX + 1];
@@ -581,15 +568,15 @@ static PyObject *inet_socket__new(struct inet_diag_msg *r, int nlmsg_len, struct
 				goto out_err;
 		}
 
-        if( proc != NULL) {
-            self->proc = malloc(sizeof(*self->proc));
-            if (self->proc == NULL)
-                goto out_err;
-            self->proc->ino = proc->ino;
-            self->proc->pid = proc->pid;
-            self->proc->fd = proc->fd;
-            strcpy(self->proc->process, proc->process);
-        }
+		if( proc != NULL) {
+			self->proc = malloc(sizeof(*self->proc));
+			if (self->proc == NULL)
+				goto out_err;
+			self->proc->ino = proc->ino;
+			self->proc->pid = proc->pid;
+			self->proc->fd = proc->fd;
+			strcpy(self->proc->process, proc->process);
+		}
 	}
     free(proc);
 
@@ -701,13 +688,13 @@ out_eof:
 	const int nlmsg_len = self->h->nlmsg_len - NLMSG_LENGTH(sizeof(*r));
 	self->h = NLMSG_NEXT(self->h, self->len);
 
+	struct user_ent *found;
+	if (!(found=malloc(sizeof(struct user_ent) + 4096))) abort();
 	if ( show_users > 0 ) {
-		char ubuf[4096];
-    	if (find_users(r->idiag_inode, ubuf, sizeof(ubuf)) > 0)
-    		printf(" users:(%s)", ubuf);
+    	find_users(r->idiag_inode, found);
 	}
 
-	return inet_socket__new(r, nlmsg_len);
+	return inet_socket__new(r, nlmsg_len, found);
 
 }
 
@@ -908,7 +895,7 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 {
 	int states = default_states;
 	int extensions = INET_DIAG_NONE;
-	int socktype = TCPDIAG_GETSOCK;
+	int socktype = IPPROTO_TCP;
 	const char *src;
 	const char *dst;
 	int sport  = -1;
@@ -929,7 +916,7 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 					 &states, &extensions, &socktype, &src, &dst, &sport, &dport, &le_spt, &le_dpt, &ge_spt, &ge_dpt, &join, &proc))
 		goto out_err;
 
-	/* TODO: THIS SHOULD BE OPTIONAL */
+	/* TODO: have different levels of process identification */
 	if ( proc > 0 ) {
 		show_users++;
 		user_ent_hash_build();
@@ -945,19 +932,19 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 
 	struct {
 		struct nlmsghdr nlh;
-        struct inet_diag_req_v2 r;
+		struct inet_diag_req_v2 r;
 	} req = {
 		.nlh = {
 			.nlmsg_len   = sizeof(req),
-            .nlmsg_type  = SOCK_DIAG_BY_FAMILY,
+			.nlmsg_type  = SOCK_DIAG_BY_FAMILY,
 			.nlmsg_flags = NLM_F_ROOT | NLM_F_MATCH | NLM_F_REQUEST,
 			.nlmsg_seq   = 123456,
 		},
 		.r = {
-            .sdiag_family    = AF_INET,
-            .sdiag_protocol  = socktype,
-			.idiag_states = states,
-			.idiag_ext    = extensions,
+			.sdiag_family    = AF_INET,
+			.sdiag_protocol  = socktype,
+			.idiag_states    = states,
+			.idiag_ext       = extensions,
 		},
 	};
 
@@ -1145,7 +1132,8 @@ PyMODINIT_FUNC initinet_diag(void)
 	PyObject *m;
 	m = Py_InitModule3("inet_diag", python_inet_diag__methods, "Example:\n\n\
 	> import inet_diag\n\
-	> idiag = inet_diag.create(states = inet_diag.default_states, extensions = inet_diag.EXT_MEMORY, socktype = inet_diag.TCPDIAG_GETSOCK, le_dpt = 500)\n\
+	> from socket import IPPROTO_TCP\n\
+	> idiag = inet_diag.create(states = inet_diag.default_states, extensions = inet_diag.EXT_MEMORY, socktype = IPPROTO_TCP, le_dpt = 500)\n\
 	> while True:\n\
 	>     try:\n\
 	>         s = idiag.get()\n\

@@ -26,6 +26,17 @@
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <linux/inet_diag.h>
+
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <string.h>
+#include <netdb.h>
+#include <dirent.h>
+#include <fnmatch.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+
 #include "diag_filter.h"
 #ifndef __unused
 #define __unused __attribute__ ((unused))
@@ -144,13 +155,13 @@ static int inet_socket__print(struct inet_socket *self, FILE *fp,
 struct user_ent {
     struct user_ent *next;
     unsigned int    ino;
-    int             pid;
-    int             fd;
-    char            process[4096];
+    int     pid;
+    int     fd;
+    char        process[0];
 };
 
 #define USER_ENT_HASH_SIZE  256
-struct user_ent *user_ent_hash[USER_ENT_HASH_SIZE] = {0};
+struct user_ent *user_ent_hash[USER_ENT_HASH_SIZE];
 
 int show_users = 0;
 
@@ -161,17 +172,20 @@ static int user_ent_hashfn(unsigned int ino)
     return val & (USER_ENT_HASH_SIZE - 1);
 }
 
-static void user_ent_add(unsigned int ino, int pid, int fd)
+static void user_ent_add(unsigned int ino, const char *process, int pid, int fd)
 {
     struct user_ent *p, **pp;
+    int str_len;
 
-    p = malloc(sizeof(struct user_ent));
+    str_len = strlen(process) + 1;
+    p = malloc(sizeof(struct user_ent) + str_len);
     if (!p)
         abort();
     p->next = NULL;
     p->ino = ino;
     p->pid = pid;
     p->fd = fd;
+    strcpy(p->process, process);
 
     pp = &user_ent_hash[user_ent_hashfn(ino)];
     p->next = *pp;
@@ -198,6 +212,7 @@ static void user_ent_hash_build(void)
 
     while ((d = readdir(dir)) != NULL) {
         struct dirent *d1;
+        char process[16];
         int pid, pos;
         DIR *dir1;
         char crap;
@@ -209,6 +224,8 @@ static void user_ent_hash_build(void)
         pos = strlen(name);
         if ((dir1 = opendir(name)) == NULL)
             continue;
+
+        process[0] = '\0';
 
         while ((d1 = readdir(dir1)) != NULL) {
             const char *pattern = "socket:[";
@@ -232,67 +249,57 @@ static void user_ent_hash_build(void)
 
             sscanf(lnk, "socket:[%u]", &ino);
 
-            user_ent_add(ino, pid, fd);
+            if (process[0] == '\0') {
+                char tmp[1024];
+                FILE *fp;
+
+                snprintf(tmp, sizeof(tmp), "%s/%d/stat", root, pid);
+                if ((fp = fopen(tmp, "r")) != NULL) {
+                    fscanf(fp, "%*d (%[^)])", process);
+                    fclose(fp);
+                }
+            }
+
+            user_ent_add(ino, process, pid, fd);
         }
         closedir(dir1);
     }
     closedir(dir);
 }
 
-static int find_users(unsigned ino, struct user_ent *found)
+static int find_users(unsigned ino, char *buf, int buflen)
 {
     struct user_ent *p;
     int cnt = 0;
+    char *ptr;
 
     if (!ino)
         return 0;
 
     p = user_ent_hash[user_ent_hashfn(ino)];
+    ptr = buf;
     while (p) {
         if (p->ino != ino)
             goto next;
 
-        found->ino  = p->ino;
-        found->fd   = p->fd;
-        found->pid  = p->pid;
-        found->next = NULL;
+        if (ptr - buf >= buflen - 1)
+            break;
 
+		/* TODO: return 'p' */
+        snprintf(ptr, buflen - (ptr - buf),
+             "(\"%s\",%d,%d),",
+             p->process, p->pid, p->fd);
+        ptr += strlen(ptr);
         cnt++;
+
     next:
         p = p->next;
     }
 
-    //get the full process path
-    char tmp[4096];
-    const char *root = getenv("PROC_ROOT") ? : "/proc/";
-
-    snprintf(tmp, sizeof(tmp), "%s/%d/exe", root, found->pid);
-    char *bin_path = canonicalize_file_name(tmp);
-    if ( bin_path != NULL ) {
-        strncpy(found->process, bin_path, 4096);
-        free(bin_path);
-    }
+    if (ptr != buf)
+        ptr[-1] = '\0';
 
     return cnt;
-}
-
-static void clear_users(void)
-{
-    struct user_ent *p;
-    struct user_ent *temp;
-    int i;
-
-    for (i = 0; i < USER_ENT_HASH_SIZE; i++) {
-        if ( user_ent_hash[i] != 0 ) {
-            p = user_ent_hash[i];
-            while ( p != NULL ) {
-                temp = p;
-                p    = p->next;
-                free(temp);
-            }
-        }
-    user_ent_hash[i] = 0;
-    }
 }
 
 static char inet_socket__daddr_doc__[] =
@@ -694,13 +701,14 @@ out_eof:
 	const int nlmsg_len = self->h->nlmsg_len - NLMSG_LENGTH(sizeof(*r));
 	self->h = NLMSG_NEXT(self->h, self->len);
 
-    struct user_ent *found;
-    if (!(found=malloc(sizeof(struct user_ent)))) abort();
-    if ( show_users > 0 ) {
-        find_users(r->idiag_inode, found);
-    }
+	if ( show_users > 0 ) {
+		char ubuf[4096];
+    	if (find_users(r->idiag_inode, ubuf, sizeof(ubuf)) > 0)
+    		printf(" users:(%s)", ubuf);
+	}
 
-    return inet_socket__new(r, nlmsg_len, found);
+	return inet_socket__new(r, nlmsg_len);
+
 }
 
 
@@ -885,6 +893,7 @@ static int filter_bytecompile(struct diag_filter *f, char **bytecode)
 	}
 }
 
+
 /* constructor */
 static char inet_diag_create__doc__[] =
 "create([states, extensions, socktype, src, sport, dst, dport, le_spt, le_dpt, ge_spt, ge_dpt, join=DIAG_FILTER_AND])\n\n\
@@ -908,22 +917,23 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 	int le_dpt = -1;
 	int ge_spt = -1;
 	int ge_dpt = -1;
+	int proc   = 0;
 	int join   = DIAG_FILTER_AND;
-	static char *kwlist[] = { "states", "extensions", "socktype", "src", "dst", "sport", "dport", "le_spt", "le_dpt", "ge_spt", "ge_dpt", "join" };
+	static char *kwlist[] = { "states", "extensions", "socktype", "src", "dst", "sport", "dport", "le_spt", "le_dpt", "ge_spt", "ge_dpt", "join", "proc" };
 	struct inet_diag *self = PyObject_NEW(struct inet_diag,
 					      &inet_diag_type);
 	if (self == NULL)
 		return NULL;
 
-	if (!PyArg_ParseTupleAndKeywords(args, keywds, "|iiissiiiiiii", kwlist,
-					 &states, &extensions, &socktype, &src, &dst, &sport, &dport, &le_spt, &le_dpt, &ge_spt, &ge_dpt, &join))
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "|iiissiiiiiiii", kwlist,
+					 &states, &extensions, &socktype, &src, &dst, &sport, &dport, &le_spt, &le_dpt, &ge_spt, &ge_dpt, &join, &proc))
 		goto out_err;
 
-    /* TODO: have different levels of process identification */
-    if ( proc > 0 ) {
-        show_users++;
-        user_ent_hash_build();
-    }
+	/* TODO: THIS SHOULD BE OPTIONAL */
+	if ( proc > 0 ) {
+		show_users++;
+		user_ent_hash_build();
+	}
 
 	self->socket = socket(AF_NETLINK, SOCK_RAW, NETLINK_INET_DIAG);
 	if (self->socket < 0)

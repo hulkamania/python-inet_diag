@@ -938,7 +938,7 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
         user_ent_hash_build();
     }
 
-	self->socket = socket(AF_NETLINK, SOCK_RAW, NETLINK_INET_DIAG);
+        self->socket = socket(AF_NETLINK, SOCK_RAW, NETLINK_INET_DIAG);
 	if (self->socket < 0)
 		goto out_err;
 
@@ -946,23 +946,45 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 		.nl_family = AF_NETLINK,
 	};
 
-	struct {
-		struct nlmsghdr nlh;
+    // allow usage of old request type with TCPDIAG_GETSOCK and DCCPDIAG_GETSOCK constants
+    int req_v2 = 1;
+    if ( socktype == TCPDIAG_GETSOCK || socktype == DCCPDIAG_GETSOCK ) {
+        req_v2 = 0;
+    }
+
+    struct {
+	struct nlmsghdr nlh;
         struct inet_diag_req_v2 r;
-	} req = {
-		.nlh = {
-			.nlmsg_len   = sizeof(req),
+    } req2 = {
+	.nlh = {
+	    .nlmsg_len   = sizeof(req2),
             .nlmsg_type  = SOCK_DIAG_BY_FAMILY,
-			.nlmsg_flags = NLM_F_ROOT | NLM_F_MATCH | NLM_F_REQUEST,
-			.nlmsg_seq   = 123456,
-		},
-		.r = {
-            .sdiag_family    = AF_INET,
-            .sdiag_protocol  = socktype,
-			.idiag_states = states,
-			.idiag_ext    = extensions,
-		},
-	};
+	    .nlmsg_flags = NLM_F_ROOT | NLM_F_MATCH | NLM_F_REQUEST,
+	    .nlmsg_seq   = 123456,
+	},
+	.r = {
+            .sdiag_family   = AF_INET,
+            .sdiag_protocol = socktype,
+	    .idiag_states   = states,
+	    .idiag_ext      = extensions,
+	},
+    };
+    struct {
+        struct nlmsghdr nlh;
+        struct inet_diag_req r;
+    } req = {
+        .nlh = {
+            .nlmsg_len   = sizeof(req),
+            .nlmsg_type  = socktype,
+	    .nlmsg_flags = NLM_F_ROOT | NLM_F_MATCH | NLM_F_REQUEST,
+	    .nlmsg_seq   = 123456,
+	},
+	.r = {
+            .idiag_family = AF_INET,
+	    .idiag_states = states,
+	    .idiag_ext    = extensions,
+	},
+    };
 
     // filter preparation
     struct diag_filter *filter;
@@ -1103,9 +1125,9 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
 
     struct iovec iov[3];
     iov[0] = (struct iovec){
-			.iov_base = &req,
-			.iov_len  = sizeof(req),
-	};
+        .iov_base = ( req_v2 == 1 ) ? &req2 : &req,
+        .iov_len  = ( req_v2 == 1 ) ? sizeof(req2) : sizeof(req),
+    };
 
     // append the filter    
     struct rtattr rta; 
@@ -1119,7 +1141,11 @@ static PyObject *inet_diag__create(PyObject *mself __unused, PyObject *args,
         iov[1] = (struct iovec){ &rta, sizeof(rta) };
         iov[2] = (struct iovec){ self->bytecode, filter_len };
 
-        req.nlh.nlmsg_len += RTA_LENGTH(filter_len);
+	if ( req_v2 == 1 ) {
+            req2.nlh.nlmsg_len += RTA_LENGTH(filter_len);
+	} else {
+            req.nlh.nlmsg_len += RTA_LENGTH(filter_len);
+	}
     } else {
         self->bytecode = NULL;
     }

@@ -103,8 +103,6 @@ static const int default_states = SS_ALL & ~((1 << SS_LISTEN) |
 
 static const int listen_states = (1<<SS_LISTEN) | (1<<SS_CLOSE);
 
-static const int listen_states = (1<<SS_LISTEN) | (1<<SS_CLOSE);
-
 static const char *tmr_name[] = {
 	"off",
 	"on",
